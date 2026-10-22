@@ -1,3 +1,4 @@
+import Link from "next/link";
 import BrandMark from "@/components/site/BrandMark";
 import { SECTIONS } from "@/lib/sections";
 
@@ -55,7 +56,7 @@ export default function Footer() {
         {/* The three chapters, in scroll order. */}
         <nav aria-labelledby="footer-products" className="mt-8 sm:mt-9">
           <h2 id="footer-products" className="eyebrow text-[0.58rem] text-gold/80">
-            Products
+            Interactive Stories
           </h2>
           <ul className="mt-1.5 flex flex-wrap items-center justify-center gap-x-1.5">
             {SECTIONS.map((section, index) => (
@@ -71,6 +72,45 @@ export default function Footer() {
                 </a>
               </li>
             ))}
+          </ul>
+        </nav>
+
+        {/* Dedicated Product Pages for search engines and direct visitor access */}
+        <nav aria-labelledby="footer-pages" className="mt-4 sm:mt-5">
+          <h2 id="footer-pages" className="eyebrow text-[0.58rem] text-gold/80">
+            Product Pages
+          </h2>
+          <ul className="mt-1.5 flex flex-wrap items-center justify-center gap-x-1.5">
+            <li>
+              <Link
+                href="/products/bread"
+                className="inline-flex min-h-[44px] items-center rounded-sm px-1.5 text-[0.8rem] text-cream/70 transition-colors hover:text-gold focus-visible:text-gold sm:px-2.5 sm:text-[0.82rem]"
+              >
+                Sandwich Bread
+              </Link>
+            </li>
+            <li aria-hidden="true" className="flex items-center">
+              <span className="h-1 w-1 rounded-full bg-gold/45" />
+            </li>
+            <li>
+              <Link
+                href="/products/soft-buns"
+                className="inline-flex min-h-[44px] items-center rounded-sm px-1.5 text-[0.8rem] text-cream/70 transition-colors hover:text-gold focus-visible:text-gold sm:px-2.5 sm:text-[0.82rem]"
+              >
+                Soft Buns
+              </Link>
+            </li>
+            <li aria-hidden="true" className="flex items-center">
+              <span className="h-1 w-1 rounded-full bg-gold/45" />
+            </li>
+            <li>
+              <Link
+                href="/products/cream-buns"
+                className="inline-flex min-h-[44px] items-center rounded-sm px-1.5 text-[0.8rem] text-cream/70 transition-colors hover:text-gold focus-visible:text-gold sm:px-2.5 sm:text-[0.82rem]"
+              >
+                Cream Buns
+              </Link>
+            </li>
           </ul>
         </nav>
 

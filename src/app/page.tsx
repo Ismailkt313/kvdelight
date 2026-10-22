@@ -6,6 +6,7 @@ import BreadChapter from "@/components/story/BreadChapter";
 import BunsChapter from "@/components/story/BunsChapter";
 import CreamChapter from "@/components/story/CreamChapter";
 import FounderSection from "@/components/site/FounderSection";
+import BrandOverview from "@/components/site/BrandOverview";
 
 export default function Home() {
   return (
@@ -27,6 +28,7 @@ export default function Home() {
 
         <CreamChapter />
         <FounderSection />
+        <BrandOverview />
       </main>
 
       <Footer />

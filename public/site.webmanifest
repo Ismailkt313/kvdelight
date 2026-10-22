@@ -1,0 +1,16 @@
+﻿{
+  "name": "KV Delight",
+  "short_name": "KV Delight",
+  "description": "KV Delight - Sandwich Bread, Soft Buns and Cream Buns",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#120b06",
+  "theme_color": "#120b06",
+  "icons": [
+    {
+      "src": "/assets/brand/kv-delight-mark.webp",
+      "sizes": "any",
+      "type": "image/webp"
+    }
+  ]
+}
