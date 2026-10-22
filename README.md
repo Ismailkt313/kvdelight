@@ -81,6 +81,54 @@ cut faces get a different material without a second draw object.
 > - The spread does **not** do a full 360°: a long loaf pointed at the camera
 >   collapses into a tunnel. It sweeps 40° to a three-quarter instead.
 
+## Device safety and the mobile tier
+
+The stage is wrapped in layers so a graphics failure can never take the page
+down — this was the iPhone XS crash: a throw inside scene setup reached React's
+boundary, and there was no boundary, so the entire route died.
+
+1. **`StageBoundary`** (`components/three/StageBoundary.tsx`) — class boundary
+   around the 3D stage only. React routes errors thrown in `useEffect` to the
+   nearest boundary, so this catches what `LoafStage`'s own try/catch cannot.
+2. **`LoafStage`** — one guarded `createBreadScene()` call. Nothing is built
+   outside the try. On failure it disposes whatever was already created and
+   renders `StageFallback`.
+3. **`StageFallback`** — the supplied bread photograph, unchanged. Captions, the
+   pack hand-off, the header and the footer keep working around it, because they
+   are DOM and live outside the stage.
+4. **`app/error.tsx`** and **`app/global-error.tsx`** — replace Next's bare
+   "Application error" screen with brand art and a retry.
+
+Hardening inside the stage:
+
+- **No non-null assertions on canvases.** `safe2d()` returns `null` instead, and
+  every texture generator degrades to `null` (materials then build without that
+  map) rather than throwing. iOS returns `null` from `getContext("2d")` under
+  memory pressure, and the four `getContext("2d")!` calls were a live
+  `TypeError` waiting to happen.
+- **Environment map is optional.** `PMREMGenerator` needs a half-float render
+  target, the most likely thing to fail on an older mobile GPU. It is only
+  attempted when the capability is present, and a failure returns no
+  environment map instead of nothing at all.
+- **Context loss is handled** — `webglcontextlost` swaps in the still.
+- **No pre-flight probe canvas**: iOS keeps a small pool of WebGL contexts, so
+  the guarded renderer construction *is* the detection.
+- Textures are **cached per size across mounts**, so React StrictMode's double
+  invoke and route re-entry do not regenerate several million `Math.sin` calls.
+
+`quality="auto"` (`lib/quality.ts`) resolves on the client, so it cannot cause a
+hydration mismatch. Touch-first, narrow, low-core or low-memory devices get:
+
+| | high | low |
+|---|---|---|
+| pixel ratio cap | 1.75 | **1** |
+| antialiasing | on | **off** |
+| crust / crumb texture | 512² | **128²** (16× less pixel work) |
+| tessellation | 30×9 | **18×5** (~2.9k triangles) |
+| lights | 6 | **4** |
+| materials | Physical (sheen/clearcoat) | **Standard** |
+| environment map | on | **off** |
+
 ## Accessibility & performance
 
 - `prefers-reduced-motion: reduce` swaps the chapter for a readable, static,
@@ -100,15 +148,30 @@ cut faces get a different material without a second draw object.
 
 ## Known limitations
 
-1. The knife is *simulated*: it plunges, saws and withdraws on a scroll schedule,
+1. **The mobile crash is fixed by construction, not confirmed on the device.**
+   There is no iPhone and no GPU in the development sandbox. What *is* verified:
+   the build, the guards (every failure path returns `null` instead of throwing),
+   the tier selection for an iPhone XS profile, and the boundary's fallback
+   markup. What is *not* verified: which of the four candidate causes actually
+   threw on the XS, and whether the full 3D scene now runs on it. See the note at
+   the end of this file.
+2. The knife is *simulated*: it plunges, saws and withdraws on a scroll schedule,
    and the seam it is working opens as it arrives. It does not test geometry
    against geometry.
-2. No crumb particles or crumbs-on-the-board yet; the board itself is still the
+3. No crumb particles or crumbs-on-the-board yet; the board itself is still the
    background gradient, not a modelled surface.
-3. Slices are a fixed count (`SLICE_COUNT` in `choreography.ts`); changing it
+4. Slices are a fixed count (`SLICE_COUNT` in `choreography.ts`); changing it
    re-derives the knife stations and the fan.
-4. Original master logo (transparent PNG/SVG) still needed; the redrawn reference
+5. Original master logo (transparent PNG/SVG) still needed; the redrawn reference
    is used meanwhile.
-5. The five coffee-website style screenshots are still missing
+6. The five coffee-website style screenshots are still missing
    (`public/assets/style/`), and the `style/` directory does not exist yet.
-6. Soft buns and cream buns are untouched placeholders, by instruction.
+7. Soft buns and cream buns are untouched placeholders, by instruction.
+
+### Confirming on the phone
+
+Open the site on the iPhone with **Settings → Safari → Advanced → Web Inspector**
+on, connect it to a Mac, then use **Safari → Develop → [iPhone] → kvdelight.app**.
+The console prints either `[KV Delight] WebGL notes: …` (running, possibly
+without an environment map), `[KV Delight] bread stage failed to start: …`
+(fell back to the still, with the cause), or `[KV Delight] WebGL context lost`.

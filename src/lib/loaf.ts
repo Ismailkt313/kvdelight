@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { safe2d } from "@/lib/webgl";
 
 /**
  * Procedural KV Delight loaf.
@@ -210,20 +211,39 @@ export function createLoafGeometry({
 
 /* -------------------------------------------------------------- textures ---- */
 
-/** Canvas-generated crust grain: fine crumb pores, no external images. */
-export function createCrustTexture(size = 512): THREE.CanvasTexture {
+/**
+ * Canvas-generated crust grain: fine crumb pores, no external images.
+ *
+ * Two changes for mobile: the pixel loop is skipped entirely if the 2D context
+ * is unavailable (iOS returns `null` under memory pressure — the old `!` turned
+ * that into a TypeError), and the finished canvas is cached per size, so a
+ * re-mount or React StrictMode's double-invoke does not re-run ~2M `Math.sin`
+ * calls. Only the (cheap) `CanvasTexture` wrapper is created per call.
+ */
+const crustCanvases = new Map<number, HTMLCanvasElement>();
+const shadowCanvases = new Map<number, HTMLCanvasElement>();
+
+function makeCrustCanvas(size: number): HTMLCanvasElement | null {
+  const cached = crustCanvases.get(size);
+  if (cached) return cached;
+
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
+
+  const ctx = safe2d(canvas);
+  if (!ctx) return null;
+
   const img = ctx.createImageData(size, size);
+  // Detail scales with size so a 128px mobile map still tiles convincingly.
+  const k = size / 512;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4;
-      // tileable-ish detail: grain + sparse pitting
-      const grain = fbm(x * 0.09, y * 0.09, 1.7, 3) * 0.08;
-      const pore = Math.pow(Math.max(0, fbm(x * 0.28, y * 0.28, 9.4, 2)), 3) * 0.22;
+      const grain = fbm(x * 0.09 * k, y * 0.09 * k, 1.7, 3) * 0.08;
+      const pore =
+        Math.pow(Math.max(0, fbm(x * 0.28 * k, y * 0.28 * k, 9.4, 2)), 3) * 0.22;
       const v = THREE.MathUtils.clamp(0.93 + grain - pore, 0.4, 1) * 255;
       img.data[i] = v;
       img.data[i + 1] = v * 0.985;
@@ -233,6 +253,14 @@ export function createCrustTexture(size = 512): THREE.CanvasTexture {
   }
 
   ctx.putImageData(img, 0, 0);
+  crustCanvases.set(size, canvas);
+  return canvas;
+}
+
+export function createCrustTexture(size = 512): THREE.CanvasTexture | null {
+  const canvas = makeCrustCanvas(size);
+  if (!canvas) return null;
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(3, 2);
@@ -241,11 +269,20 @@ export function createCrustTexture(size = 512): THREE.CanvasTexture {
   return tex;
 }
 
-/** Soft contact shadow under the loaf (alpha only). */
-export function createShadowTexture(size = 256): THREE.CanvasTexture {
+/** Soft contact shadow under the loaf (alpha only). Cached like the crust. */
+export function createShadowTexture(size = 256): THREE.CanvasTexture | null {
+  const cached = shadowCanvases.get(size);
+  if (cached) {
+    const tex = new THREE.CanvasTexture(cached);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = safe2d(canvas);
+  if (!ctx) return null;
+
   const g = ctx.createRadialGradient(
     size / 2,
     size / 2,
@@ -273,17 +310,18 @@ export function createShadowTexture(size = 256): THREE.CanvasTexture {
   ctx.fillStyle = mask;
   ctx.fillRect(0, 0, size, size);
 
+  shadowCanvases.set(size, canvas);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
 /** Crust material — matte, slightly waxy, vertex-coloured. */
-export function createCrustMaterial(grain: THREE.Texture) {
+export function createCrustMaterial(grain: THREE.Texture | null) {
   return new THREE.MeshPhysicalMaterial({
     vertexColors: true,
-    map: grain,
-    bumpMap: grain,
+    // Spread rather than `map: undefined` — three warns on explicit undefined.
+    ...(grain ? { map: grain, bumpMap: grain } : {}),
     bumpScale: 0.042,
     roughness: 0.72,
     metalness: 0,

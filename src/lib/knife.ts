@@ -31,7 +31,7 @@ export type KnifeParts = {
   dispose: () => void;
 };
 
-export function createKnife(bladeMap: THREE.Texture): KnifeParts {
+export function createKnife(bladeMap: THREE.Texture | null): KnifeParts {
   const group = new THREE.Group();
   const disposables: { dispose: () => void }[] = [];
 
@@ -79,7 +79,7 @@ export function createKnife(bladeMap: THREE.Texture): KnifeParts {
 
   const bladeMaterial = new THREE.MeshStandardMaterial({
     color: "#c9cfd6",
-    map: bladeMap,
+    ...(bladeMap ? { map: bladeMap } : {}),
     metalness: 1,
     roughness: 0.26,
     envMapIntensity: 1.5,
