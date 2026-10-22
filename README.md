@@ -23,7 +23,9 @@ Nothing is fetched from a third party at build time or at runtime.
 
 | Path | Purpose |
 |---|---|
-| `src/app/page.tsx` | Page composition: bread chapter, next-chapter placeholders, footer. |
+| `src/app/page.tsx` | Page composition: hero, bread chapter, next-chapter placeholders, footer. |
+| `src/components/site/Hero.tsx` | The opening act: crest, wordmark, headline, one whole loaf — before any of the film runs. |
+| `src/components/site/BrandMark.tsx` | The supplied mark on a cream oval, at one ratio, from one asset. |
 | `src/components/story/BreadChapter.tsx` | The chapter's DOM and scroll driver: five caption beats, the packaging hand-off, reduced-motion document. |
 | `src/components/three/LoafStage.tsx` | three.js stage: lighting, environment, slice meshes, knife, camera, render loop. |
 | `src/lib/slices.ts` | **Sliced loaf geometry**: ten closed slabs, each with a crust shell, crumb cut faces and a crust rim. |
@@ -32,18 +34,79 @@ Nothing is fetched from a third party at build time or at runtime.
 | `src/lib/choreography.ts` | Scene timings, caption windows, knife + seam schedules. Shared by DOM and WebGL. |
 | `src/lib/sliceLayout.ts` | Slice transforms, arc fan, yaw, camera framing, caption clearance. Pure maths. |
 | `src/lib/loaf.ts` | The original whole-loaf geometry, its `fbm` noise (reused by the slices) and the crust material. |
-| `src/components/site/Header.tsx`, `ProgressRail.tsx` | Brand header and numbered progress rail. Unchanged. |
+| `src/components/site/Header.tsx`, `ProgressRail.tsx` | Masthead (crest + wordmark + chapter nav) and numbered progress rail. |
 | `public/assets/` | Supplied assets only — see `public/assets/CREDITS.md`. |
 
-## The bread chapter (`h-[560svh]`, one pinned stage)
+## The opening act
+
+The page used to open *inside* the bread chapter, so the first frame was the 3D
+loaf filling the screen with the headline laid over it. `Hero.tsx` now owns the
+first screen: crest, wordmark, headline, one line of support, and the supplied
+loaf photograph — and the cutting film only begins after it scrolls away.
+
+The badge needed a decision. `kv-delight-logo-reference.png` is **red and gold
+ink with no plate**: the white behind it is the page it was exported on, and its
+oval ring is an *open arc* (measurably so — a 56 px morphological close still
+leaves the interior connected to the outside), so there is no keying operation
+that can enclose it. What the brand does with its own mark, in
+`bread-hero-scene.png`, is print it on a cream oval — so that is what `BrandMark`
+is: a cream oval **behind** the untouched artwork. Brand red goes from 3.7:1 on
+ink to 4.7:1 on cream, nothing is recoloured, redrawn or cropped, and there is no
+white tile, shadow or glow. `kv-delight-mark.{png,webp}` is the derived
+transparent art (original file untouched).
+
+Copy order on a phone is deliberate: branding → headline → support → bread. The
+loaf never sits under a line of type, at any width.
+
+## The bread chapter (`h-[520svh]`, one pinned stage)
 
 Section progress `p` is written by ScrollTrigger into a ref and read by the
 render loop, so GSAP drives the DOM while three.js stays on `requestAnimationFrame`.
 Captions and geometry read the same windows, so they cannot drift apart.
 
+ScrollTrigger only reports the raw scroll position, so the ref holds a value that
+is *filtered* toward it by a one-pole smoothing loop (18% per frame). That is why
+the dolly eases after the finger instead of stepping with each wheel notch —
+`scrub` cannot do it here, because there is no timeline for it to interpolate.
+
+The stage is **not mounted at page load**. An `IntersectionObserver` with a
+-30% bottom margin waits until the hero has actually been scrolled before
+importing `LoafStage`; `StagePoster` (the same photograph the hero used) holds
+the frame, and the canvas fades in over 900 ms. On a phone this keeps the WebGL
+context, four procedural textures and ten slab geometries off the critical path
+entirely.
+
+### The framing contract
+
+`sliceLayout.ts` decides where the bread lands, and both the camera fit and the
+DOM caption column read the same numbers:
+
+- `CAPTION_BOX` — the strip the captions occupy (`top: 0.72` of the viewport).
+- `captionShift` / `frameWidthFraction` — the bread's box, as fractions of the
+  frame, sliding right of the caption column on landscape and centred on
+  portrait.
+- `fitScale` — fits the arrangement to that box *as projected*, compensating for
+  the near slices of a fanned deck, which sit in front of the measurement plane
+  and would otherwise clip the frame edge.
+- `breadScreenRect(p, aspect)` — the same projection, exposed so the invariant is
+  checkable without a browser.
+
+Checked at ten viewports (320×680 through 2560×1080, portrait and landscape) and
+101 progress values each: the bread never enters the caption box and never leaves
+the frame. That is arithmetic, not a tuned margin — it holds for a headline that
+has not been written yet.
+
+### No seams before the cut
+
+Ten closed slabs laid flush still rasterise a hairline between each pair, which
+reads as "pre-sliced" on the opening frame. `seamGaps` therefore returns a
+negative gap — `SEAM_OVERLAP`, 0.006 loaf units — for every seam the blade has
+not reached, so neighbouring slabs interpenetrate by a hair and the crust is
+continuous until the cut. It collapses to zero the moment that seam opens.
+
 | `p` | Scene | What happens |
 |---|---|---|
-| 0.00 → 0.15 | **A · Whole loaf** | One complete, unsliced loaf at a three-quarter angle: "Every Bite Brings Delight", scroll cue. |
+| 0.00 → 0.15 | **A · Whole loaf** | One complete, unsliced loaf at a three-quarter angle. Nothing is cut yet, and nothing *looks* cut: see "no seams before the cut" below. |
 | 0.15 → 0.42 | **B · The cut** | The serrated knife drops into seam 1, saws through, lifts, repeats. Nine seams, left to right. Each seam's crack opens *as* the blade reaches it. |
 | 0.42 → 0.60 | **C · Slices separate** | The slabs let go one at a time, each lifting and swinging slightly as its seams widen. Pale crumb, golden crust, a thin baked rim on every cut face. |
 | 0.56 → 0.74 | **D · Spread** | The arrangement bends into an arc fan while the camera rises to a three-quarter view. |
@@ -155,18 +218,21 @@ Remove the panel (and this section) once the device is confirmed healthy.
 
 - `prefers-reduced-motion: reduce` swaps the chapter for a readable, static,
   image-and-text document (no pinning, no scrub, no WebGL).
-- The chapter has an `sr-only` `h1`, and an `sr-only` paragraph that describes all
-  five scenes for anyone who cannot see the film. Captions are real text.
+- The only `h1` is the hero's; the chapter is an `h2` section with an `sr-only`
+  paragraph describing all five scenes for anyone who cannot see the film.
+  Captions are real text.
 - Skip link, visible focus rings, `<nav aria-label>`; coming-soon chapters are
   `aria-disabled` spans, not dead links.
-- Render loop pauses via `IntersectionObserver` when the stage is off-screen; DPR
-  capped at 1.75 (1.5 mobile, 1.4 on the low-quality path).
+- The stage is not mounted until the chapter is approached, and its render loop
+  pauses via `IntersectionObserver` when off-screen; DPR capped at 1.75 desktop,
+  1 mobile.
 - Geometry is generated once and disposed on unmount. Materials switch to
   transparent only for the hand-off fade, so slabs sort crisply while being
   studied. Crumb/blade textures are canvas-generated — no network requests.
 - WebGL failure falls back to the supplied hero photograph — never a stock image.
-- Framing is computed from the arrangement's real rotated extent, so the fan is
-  fitted to the frame at every aspect ratio instead of being scaled by hand.
+- Framing is computed from the arrangement's real rotated extent *and* its
+  projected magnification, so the fan fits the frame at every aspect ratio
+  instead of being scaled by hand.
 
 ## Known limitations
 
@@ -184,8 +250,12 @@ Remove the panel (and this section) once the device is confirmed healthy.
    background gradient, not a modelled surface.
 4. Slices are a fixed count (`SLICE_COUNT` in `choreography.ts`); changing it
    re-derives the knife stations and the fan.
-5. Original master logo (transparent PNG/SVG) still needed; the redrawn reference
-   is used meanwhile.
+5. **The master logo is still the supplied raster.** `kv-delight-mark.webp` is
+   derived from it (background removed, colours untouched) and the cream oval is
+   CSS, not part of the file. A vector master would sharpen the 44 px crest, but
+   the supplied art must not be redrawn. The hero photograph is also pre-sliced:
+   the *3D* loaf is seam-free until the blade arrives, and the photograph was not
+   retouched to match.
 6. The five coffee-website style screenshots are still missing
    (`public/assets/style/`), and the `style/` directory does not exist yet.
 7. Soft buns and cream buns are untouched placeholders, by instruction.

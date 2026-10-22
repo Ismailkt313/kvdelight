@@ -7,23 +7,25 @@ import {
   createCrustTexture,
   createShadowTexture,
 } from "@/lib/loaf";
-import { createSliceGeometries, LOAF } from "@/lib/slices";
+import { createSliceGeometries } from "@/lib/slices";
 import { createKnife } from "@/lib/knife";
 import {
   createBladeTexture,
   createCrumbBump,
   createCrumbTexture,
 } from "@/lib/breadTextures";
-import { smoothstep } from "@/lib/choreography";
+import { TIMELINE, smoothstep } from "@/lib/choreography";
 import {
   BASE_Y,
+  FOV,
   baseView,
   captionShift,
   cameraFor,
-  frameWidthFraction,
+  fitScale,
   knifeTransform,
   layoutSlices,
   yawAt,
+  type SliceLayout,
 } from "@/lib/sliceLayout";
 import {
   clampTextureSize,
@@ -57,8 +59,6 @@ type LoafStageProps = {
   quality?: QualityTier | "auto";
   onReady?: () => void;
 };
-
-const FOV = 34;
 
 type EnvResult = { texture: THREE.Texture | null; disposed: () => void };
 
@@ -423,32 +423,52 @@ function createBreadScene({
     let fit = 1;
     let lastP = -1;
 
-    const applySlices = (p: number) => {
+    const applySlices = (p: number): SliceLayout => {
       const layout = layoutSlices(p, spreadScale);
       for (let i = 0; i < meshes.length; i++) {
         const t = layout.transforms[i];
         meshes[i].position.set(t.x, t.y, t.z);
         meshes[i].rotation.set(t.rx, t.ry, t.rz);
       }
-      return layout.width;
+      return layout;
     };
 
     /* -------------------------------------------------------- choreography -- */
-    const applyKnife = (p: number) => {
+    /**
+     * The blade's opacity.
+     *
+     * This used to be a hard `visible` toggle, which put a full-size knife on
+     * screen in a single frame on the way in and removed it in another. It now
+     * ramps over the first and last percent of the cut window, so the knife
+     * arrives and leaves the way everything else in the film does.
+     */
+    const knifeOpacity = (p: number) =>
+      smoothstep(TIMELINE.cutStart - 0.004, TIMELINE.cutStart + 0.012, p) *
+      (1 - smoothstep(TIMELINE.cutEnd - 0.014, TIMELINE.cutEnd, p));
+
+    const applyKnife = (p: number, fade: number) => {
       const k = knifeTransform(p);
-      knifePivot.visible = k.visible;
-      if (!k.visible) return;
+      const opacity = knifeOpacity(p) * (1 - fade);
+      const shown = opacity > 0.003;
+      knifePivot.visible = shown;
+      for (const mat of knifeMaterials) {
+        const transparent = opacity < 0.999;
+        if (mat.transparent !== transparent) {
+          mat.transparent = transparent;
+          mat.needsUpdate = true;
+        }
+        mat.opacity = opacity;
+      }
+      if (!shown) return;
       knifePivot.position.set(k.x, k.y, k.z);
       // Spine tips forward into the cut; the edge stays in the seam plane.
       knifePivot.rotation.set(k.rx, 0, 0.03 * (k.rx / -0.16 || 0));
     };
 
-    const fadeMaterials = [
-      crustMat,
-      crumbMat,
-      knife.bladeMaterial,
-      knife.handleMaterial,
-    ];
+    // The bread itself. The knife is handled separately: it has its own
+    // fade-in/out at the edges of the cut window, and the two opacities multiply.
+    const fadeMaterials = [crustMat, crumbMat];
+    const knifeMaterials = [knife.bladeMaterial, knife.handleMaterial];
 
     /**
      * The hand-off fade. Materials stay opaque for the whole film so the slabs
@@ -469,7 +489,8 @@ function createBreadScene({
     };
 
     const update = (p: number) => {
-      const width = applySlices(p);
+      const layout = applySlices(p);
+      const width = layout.width;
       world.rotation.y = yawAt(p);
 
       /* camera: a slow push through the cut, then up and over the fan */
@@ -478,21 +499,14 @@ function createBreadScene({
       camera.position.y = cam.camY;
       camera.lookAt(0, cam.lookY, 0);
 
-      /* fit the arrangement, whatever its aspect */
+      /* fit the arrangement, whatever its aspect — see `fitScale` */
       const dist = Math.max(2, camera.position.z);
       const halfH = Math.tan((FOV * Math.PI) / 180 / 2) * dist;
       const halfW = halfH * camera.aspect;
-      const neededW = width / 2;
-      const neededH = LOAF.height * 0.62 + 0.55;
-      fit = Math.min(
-        1.02,
-        (halfW * frameWidthFraction(p, camera.aspect)) / Math.max(0.001, neededW),
-        (halfH * 0.86) / neededH,
-      );
-      if (!Number.isFinite(fit) || fit <= 0) fit = 1;
+      fit = fitScale(p, camera.aspect, layout);
       world.scale.setScalar(fit);
 
-      // Sit clear of the left-hand caption on desktop, while the loaf is whole.
+      // Sit clear of the caption column on desktop, while the loaf is whole.
       world.position.x = captionShift(p, camera.aspect) * halfW;
 
       /* hand-off: the bread leaves, the pack arrives */
@@ -504,7 +518,7 @@ function createBreadScene({
       shadowMat.opacity = (1 - fade) * 0.8;
       shadow.scale.x = width + 1.4;
 
-      applyKnife(p);
+      applyKnife(p, fade);
     };
 
     /**
@@ -513,7 +527,7 @@ function createBreadScene({
      * visible hitch at the packaging hand-off (and on the way back up).
      */
     const prewarm = () => {
-      for (const mat of fadeMaterials) {
+      for (const mat of [...fadeMaterials, ...knifeMaterials]) {
         const wasTransparent = mat.transparent;
         mat.transparent = !wasTransparent;
         mat.needsUpdate = true;

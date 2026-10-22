@@ -1,4 +1,4 @@
-import { clamp01, knifePose, seamGaps, smoothstep, SLICE_COUNT } from "@/lib/choreography";
+import { clamp01, knifePose, seamGaps, smoothstep, SLICE_COUNT, TIMELINE } from "@/lib/choreography";
 import { LOAF } from "@/lib/slices";
 
 /**
@@ -189,7 +189,9 @@ export type View = {
 /** Base framing per aspect ratio, before the per-progress moves. */
 export function baseView(aspect: number): View {
   if (aspect < 0.8) {
-    return { camZ: 10.6, camY: 0.95, lookY: -0.3, yShift: -0.5, spreadScale: 0.4 };
+    // Phone: the caption owns the bottom of the frame, so the camera aims lower
+    // than the loaf and the bread sits in the band above the copy.
+    return { camZ: 10.6, camY: 0.95, lookY: -0.56, yShift: -0.5, spreadScale: 0.4 };
   }
   if (aspect < 1.15) {
     return { camZ: 8.2, camY: 1.0, lookY: -0.05, yShift: -0.22, spreadScale: 0.68 };
@@ -246,27 +248,191 @@ export function knifeTransform(p: number): KnifeTransform {
   };
 }
 
-/* ------------------------------------------------------------- framing --- */
+/* ---------------------------------------------------------------- framing -- */
+
+/** Vertical field of view, in degrees. Shared with the stage's camera. */
+export const FOV = 34;
 
 /**
- * Desktop puts the captions in the left third, so the bread composition is
- * nudged right to sit clear of them. Expressed as a fraction of the visible
- * half-width and consumed by the camera fit, so the two never disagree.
+ * Desktop framing is a *contract*, not a nudge.
+ *
+ * The captions own the left of the frame; the loaf owns a box on the right that
+ * starts at `centre - width / 2` and ends at `centre + width / 2`. Because the
+ * box is expressed as fractions of the visible frame, the camera fit and the DOM
+ * caption column cannot drift apart — which is what used to let the loaf sit on
+ * top of the headline on a 1440 px screen but clear it on a 1920 px one.
+ *
+ * Values are fractions of the frame width. `beside` 0.46 at `centre` 0.735 puts
+ * the left edge of the bread at 50.5% — the caption column ends at ~42%.
  */
-export function captionShift(p: number, aspect: number): number {
-  if (aspect < 0.8) return 0; // portrait: captions sit below the stage
-  const base = aspect < 1.15 ? 0.08 : 0.22;
-  // Only while the loaf is whole and being cut, where the caption sits beside
-  // it. The spread drops its caption to the bottom of the frame and takes the
-  // full width back.
-  return base * smoothstep(0.04, 0.3, p) * (1 - smoothstep(0.5, 0.6, p));
+export const CAPTION_FRAME = {
+  beside: { wide: 0.46, medium: 0.36 },
+  centre: { wide: 0.735, medium: 0.68 },
+  /**
+   * Once the caption drops to the bottom, the bread takes the frame. Not 1.0:
+   * the width used by the camera fit is measured in loaf units at z = 0, and the
+   * near end of a fanned deck sits in front of that plane, so it projects about
+   * 4% wider than the number suggests.
+   */
+  full: 0.8,
+  /** Portrait: caption below the stage, bread across the frame. */
+  portrait: 0.9,
+} as const;
+
+/** 1 while the caption sits beside the loaf; 0 once it drops to the bottom. */
+export function captionBeside(p: number): number {
+  // The captions move to the bottom *before* the bread is allowed out of its
+  // box; the two must never cross while both are visible.
+  return 1 - smoothstep(0.6, 0.68, p);
 }
 
 /**
- * How much of the frame width the bread may use. The caption shift is spent out
- * of this budget — fitting to 86% of the width and *then* sliding right is what
- * used to push the last slices off the edge of the screen.
+ * Horizontal nudge of the bread composition, as a fraction of the visible
+ * half-width. Portrait centres the loaf; landscape pushes it into its box.
+ */
+export function captionShift(p: number, aspect: number): number {
+  if (aspect < 0.8) return 0;
+  const frac = aspect < 1.15 ? CAPTION_FRAME.centre.medium : CAPTION_FRAME.centre.wide;
+  return Math.max(0, 2 * frac - 1) * captionBeside(p);
+}
+
+/**
+ * How much of the frame width the bread may use. The stage multiplies this by
+ * the visible half-width, so `0.46` means the loaf spans 46% of the frame.
  */
 export function frameWidthFraction(p: number, aspect: number): number {
-  return Math.max(0.42, 0.9 - captionShift(p, aspect));
+  if (aspect < 0.8) return CAPTION_FRAME.portrait;
+  const beside = captionBeside(p);
+  const small = aspect < 1.15 ? CAPTION_FRAME.beside.medium : CAPTION_FRAME.beside.wide;
+  return CAPTION_FRAME.full + (small - CAPTION_FRAME.full) * beside;
+}
+
+
+/**
+ * Scale that fits the arrangement into the frame *as projected*.
+ *
+ * The width budget is measured in world units on the plane through the origin,
+ * but a fanned deck has depth: its near slices sit in front of that plane and
+ * therefore project wider than the flat measurement suggests. Compensating for
+ * the magnification at the near edge is what stops the outermost slice of the
+ * fan from being clipped on wide screens — and it only bites once the fan has
+ * depth, so the whole loaf is not made smaller for it.
+ */
+export function fitScale(p: number, aspect: number, layout: SliceLayout): number {
+  const tanHalf = Math.tan((FOV * Math.PI) / 180 / 2);
+  const cam = cameraFor(p, aspect);
+  const halfH = tanHalf * cam.camZ;
+  const halfW = halfH * aspect;
+
+  const widthBudget = halfW * frameWidthFraction(p, aspect);
+  const heightBudget = halfH * 0.86;
+  const neededW = Math.max(0.001, layout.width / 2);
+  const neededH = Math.max(0.001, LOAF.height * 0.62 + 0.55);
+
+  let fit = Math.min(1.02, widthBudget / neededW, heightBudget / neededH);
+  for (let k = 0; k < 2; k++) {
+    // Near edge of the arrangement, in front of the camera.
+    const zNear = (layout.depth / 2) * fit;
+    const mag = cam.camZ / Math.max(1, cam.camZ - zNear);
+    // Divided out of both budgets: height is magnified by the same lens.
+    fit = Math.min(1.02, widthBudget / (neededW * mag), heightBudget / (neededH * mag));
+  }
+  return Number.isFinite(fit) && fit > 0 ? fit : 1;
+}
+
+/* ----------------------------------------------------------- screen rect -- */
+
+export type ScreenRect = {
+  /** Fractions of the viewport, 0 = left / top. */
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+/**
+ * Where the bread actually lands on screen at progress `p` and viewport aspect.
+ *
+ * This mirrors — line for line — the projection `LoafStage` performs: same
+ * camera, same fit, same shift. It exists so that "the loaf never covers the
+ * headline" is a checkable property of the shipped maths rather than something
+ * eyeballed once on one monitor: projecting the bread box and comparing it with
+ * `CAPTION_BOX` needs no browser at all.
+ */
+export function breadScreenRect(p: number, aspect: number): ScreenRect {
+  const cam = cameraFor(p, aspect);
+  const layout = layoutSlices(p, baseView(aspect).spreadScale);
+
+  const tanHalf = Math.tan((FOV * Math.PI) / 180 / 2);
+  const halfH = tanHalf * cam.camZ;
+  const halfW = halfH * aspect;
+  const fit = fitScale(p, aspect, layout);
+  const centreX = captionShift(p, aspect) * halfW;
+
+  // Camera basis, exactly as `camera.lookAt` builds it.
+  const pos = { x: 0, y: cam.camY, z: cam.camZ };
+  const fLen = Math.hypot(cam.lookY - pos.y, -pos.z) || 1;
+  const f = { x: 0, y: (cam.lookY - pos.y) / fLen, z: -pos.z / fLen };
+  const right = { x: -f.z, y: 0, z: f.x };
+  const up = {
+    x: right.y * f.z - right.z * f.y,
+    y: right.z * f.x - right.x * f.z,
+    z: right.x * f.y - right.y * f.x,
+  };
+
+  const halfX = (layout.width / 2) * fit;
+  const halfZ = (layout.depth / 2) * fit;
+  const topY = (BASE_Y + LOAF.height * 1.07) * fit;
+  const bottomY = BASE_Y * fit;
+
+  let left = Infinity;
+  let right2 = -Infinity;
+  let top = Infinity;
+  let bottom = -Infinity;
+
+  for (const x of [centreX - halfX, centreX + halfX]) {
+    for (const y of [bottomY, topY]) {
+      for (const z of [-halfZ, halfZ]) {
+        const d = { x: x - pos.x, y: y - pos.y, z: z - pos.z };
+        const depth = d.x * f.x + d.y * f.y + d.z * f.z;
+        if (depth <= 0.05) continue;
+        const xv = d.x * right.x + d.y * right.y + d.z * right.z;
+        const yv = d.x * up.x + d.y * up.y + d.z * up.z;
+        const ndcX = xv / (depth * tanHalf * aspect);
+        const ndcY = yv / (depth * tanHalf);
+        left = Math.min(left, (ndcX + 1) / 2);
+        right2 = Math.max(right2, (ndcX + 1) / 2);
+        top = Math.min(top, (1 - ndcY) / 2);
+        bottom = Math.max(bottom, (1 - ndcY) / 2);
+      }
+    }
+  }
+
+  return { left, right: right2, top, bottom };
+}
+
+/**
+ * The DOM caption column, as fractions of the viewport. Must stay in sync with
+ * the classes in `BreadChapter` — the framing check asserts the two never meet.
+ */
+export type Box = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+/**
+ * The strip the captions live in — the same on every viewport, because the DOM
+ * anchors them to the bottom in `BreadChapter`.
+ *
+ * One rule for the whole film instead of a box that moves with the choreography:
+ * the caption never changes place, so there is no moment where text and bread
+ * can cross, and the composition stays identical from phone to ultrawide.
+ */
+export const CAPTION_BOX: Box = { left: 0, right: 1, top: 0.72, bottom: 1 };
+
+/** The caption strip that applies at `p`, or null once the pack copy takes over. */
+export function captionBox(p: number): Box | null {
+  return p >= TIMELINE.holdEnd ? null : CAPTION_BOX;
 }

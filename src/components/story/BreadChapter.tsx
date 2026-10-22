@@ -10,13 +10,30 @@ import { note, reportError } from "@/lib/diagnostics";
 import { paint } from "@/lib/domPaint";
 import { BEATS, TIMELINE, bell, smoothstep } from "@/lib/choreography";
 
+/**
+ * The still that holds the stage while its chunk is in flight. Same photograph
+ * the hero used, so the hand-off into the film is not a jump between products.
+ */
+function StagePoster() {
+  return (
+    <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+      <img
+        src="/assets/product/bread-hero-loaf-crop.webp"
+        alt=""
+        width={941}
+        height={569}
+        loading="lazy"
+        decoding="async"
+        className="absolute inset-x-0 top-1/2 h-auto w-full -translate-y-1/2 object-cover opacity-45"
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(90%_70%_at_50%_38%,rgba(42,26,13,0.35)_0%,rgba(22,13,6,0.62)_55%,rgba(12,7,3,0.9)_100%)]" />
+    </div>
+  );
+}
+
 const LoafStage = dynamic(() => import("@/components/three/LoafStage"), {
   ssr: false,
-  loading: () => (
-    <div className="absolute inset-0 grid place-items-center">
-      <span className="eyebrow animate-pulse">Preparing the oven…</span>
-    </div>
-  ),
+  loading: () => <StagePoster />,
 });
 
 export default function BreadChapter() {
@@ -25,12 +42,52 @@ export default function BreadChapter() {
   const packRef = useRef<HTMLDivElement>(null);
   const packShadowRef = useRef<HTMLDivElement>(null);
   const packCopyRef = useRef<HTMLDivElement>(null);
-  const cueRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef(0);
   const reduced = useReducedMotion();
   // Set when the scroll choreography itself fails: the chapter then renders its
   // static, readable document instead of blanking the route.
   const [motionFailed, setMotionFailed] = useState(false);
+  /**
+   * The 3D scene is *not* mounted at page load any more.
+   *
+   * With the branded hero in front of this chapter, the stage is a full screen
+   * below the fold on every device — building ten slabs, four procedural
+   * textures and a WebGL context for it while the visitor is still reading the
+   * headline bought nothing and cost the hero its first-paint budget on a phone.
+   * The observer flips this the first time the chapter comes within half a
+   * screen, and the poster holds the frame until then.
+   */
+  const [stageWanted, setStageWanted] = useState(false);
+
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    if (typeof IntersectionObserver !== "function") {
+      setStageWanted(true);
+      return;
+    }
+    let io: IntersectionObserver | undefined;
+    try {
+      io = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((e) => e.isIntersecting)) {
+            setStageWanted(true);
+            io?.disconnect();
+          }
+        },
+        // The section begins exactly at the bottom of the hero, so an unstyled
+        // observer fires on the first frame of the page load. Pulling the root's
+        // bottom edge up by 30% means the visitor has to have actually started
+        // the hero — and the ~1 screen of scroll still to come is enough for the
+        // chunk and the scene to be ready before the film is reached.
+        { rootMargin: "0px 0px -30% 0px" },
+      );
+      io.observe(el);
+    } catch {
+      setStageWanted(true);
+    }
+    return () => io?.disconnect();
+  }, []);
 
   const onReady = useCallback(() => {
     // Called from inside the 3D stage's setup; a throw here would be reported
@@ -56,8 +113,7 @@ export default function BreadChapter() {
     const packEl = packRef.current;
     const packCopyEl = packCopyRef.current;
     const packShadowEl = packShadowRef.current;
-    const cueEl = cueRef.current;
-    if (!packEl || !packCopyEl || !packShadowEl || !cueEl) {
+    if (!packEl || !packCopyEl || !packShadowEl) {
       note("choreography", "skipped: one or more motion refs were not mounted");
       return;
     }
@@ -103,9 +159,6 @@ export default function BreadChapter() {
 
       const copyIn = smoothstep(TIMELINE.packCopy, TIMELINE.packCopyEnd, p);
       paint(packCopyEl, { opacity: copyIn, translateY: (1 - copyIn) * 22 });
-
-      // Opening cue
-      paint(cueEl, { opacity: 1 - smoothstep(0, 0.045, p) });
     };
 
     try {
@@ -116,22 +169,54 @@ export default function BreadChapter() {
       return;
     }
 
+    /**
+     * Smoothing.
+     *
+     * `scrub: true` hands the raw scroll position straight to `onUpdate`, which
+     * makes every wheel notch a visible step — on a trackpad it reads as judder
+     * in the camera dolly. This is a one-pole filter toward the scroll position,
+     * driven by its own frame loop, so the film eases after the finger instead
+     * of snapping to it. It is deliberately *not* a GSAP tween: the geometry
+     * reads `progressRef`, and a tween would have given the DOM and the 3D two
+     * different notions of "now".
+     */
+    let raf = 0;
+    let target = 0;
+    let shown = 0;
+
+    const step = () => {
+      raf = 0;
+      const delta = target - shown;
+      try {
+        if (Math.abs(delta) < 0.0005) {
+          shown = target;
+        } else {
+          shown += delta * 0.18;
+        }
+        progressRef.current = shown;
+        update(shown);
+      } catch (error) {
+        reportError("choreography:frame", error);
+        setMotionFailed(true);
+        return;
+      }
+      if (shown !== target) raf = requestAnimationFrame(step);
+    };
+
+    const seek = (v: number) => {
+      target = v;
+      if (!raf) raf = requestAnimationFrame(step);
+    };
+
     let st: ScrollTrigger | undefined;
     try {
       st = ScrollTrigger.create({
         trigger: section,
         start: "top top",
         end: "bottom bottom",
-        scrub: true,
         invalidateOnRefresh: true,
         onUpdate(self) {
-          try {
-            const p = self.progress;
-            progressRef.current = p;
-            update(p);
-          } catch (error) {
-            reportError("choreography:onUpdate", error);
-          }
+          seek(self.progress);
         },
       });
     } catch (error) {
@@ -140,6 +225,22 @@ export default function BreadChapter() {
       reportError("choreography:scrolltrigger", error);
       setMotionFailed(true);
       return;
+    }
+
+    // A reload that lands mid-chapter never sees a scroll event; without this
+    // the film would paint its first frame and then jump to the real position.
+    // Set directly rather than through `seek`, so there is no catch-up animation
+    // on load.
+    try {
+      const start = st.progress;
+      if (start > 0) {
+        shown = start;
+        target = start;
+        progressRef.current = start;
+        update(start);
+      }
+    } catch (error) {
+      reportError("choreography:initial-seek", error);
     }
 
     // Fonts and images change layout height — re-measure once they settle.
@@ -155,6 +256,7 @@ export default function BreadChapter() {
 
     return () => {
       window.removeEventListener("load", refresh);
+      cancelAnimationFrame(raf);
       try {
         st?.kill();
       } catch {
@@ -168,20 +270,18 @@ export default function BreadChapter() {
   if (reduced || motionFailed) {
     return (
       <section id="bread" aria-labelledby="bread-heading" className="relative">
-        <div className="mx-auto max-w-6xl px-5 pb-8 pt-28 sm:px-8 sm:pt-36">
+        <div className="mx-auto max-w-6xl px-5 pb-8 pt-20 sm:px-8 sm:pt-24">
           <p className="eyebrow">Chapter one — Bread</p>
-          <h1
+          <h2
             id="bread-heading"
-            className="display mt-4 text-[13vw] leading-[0.9] sm:text-[6.5vw]"
+            className="display mt-4 text-[clamp(2rem,7vw,3.4rem)] leading-[0.95]"
           >
-            Every Bite
-            <br />
-            <em className="not-italic text-gold">Brings Delight</em>
-          </h1>
+            One loaf, whole and warm — then sliced, slice by slice
+          </h2>
           <p className="mt-6 max-w-xl text-sm leading-relaxed text-cream-dim">
-            One loaf, out of the tin and into the light — then sliced, slice by
-            slice. The animated film is paused because your device asks for
-            reduced motion; the story is below in full.
+            {motionFailed
+              ? "The animated film could not start on this device, so the story is below in full."
+              : "The animated film is paused because your device asks for reduced motion; the story is below in full."}
           </p>
         </div>
 
@@ -243,13 +343,13 @@ export default function BreadChapter() {
     );
   }
 
-  /* -------------------------------------------------------- motion view --- */
+  /* ------------------------------------------------------- motion view --- */
   return (
     <section
       id="bread"
       ref={sectionRef}
       aria-labelledby="bread-heading"
-      className="relative h-[560svh]"
+      className="relative h-[520svh]"
     >
       <div className="sticky top-0 h-[100svh] w-full overflow-hidden">
         {/* atmosphere */}
@@ -261,15 +361,21 @@ export default function BreadChapter() {
             hand-off, the header or the footer with it — it swaps in the still
             and leaves the rest of the chapter running. */}
         <div className="absolute inset-0">
-          <StageBoundary>
-            <LoafStage
-              progressRef={progressRef}
-              active
-              reducedMotion={false}
-              quality="auto"
-              onReady={onReady}
-            />
-          </StageBoundary>
+          {stageWanted ? (
+            <div className="stage-enter absolute inset-0">
+              <StageBoundary>
+                <LoafStage
+                  progressRef={progressRef}
+                  active
+                  reducedMotion={false}
+                  quality="auto"
+                  onReady={onReady}
+                />
+              </StageBoundary>
+            </div>
+          ) : (
+            <StagePoster />
+          )}
         </div>
 
         {/* floor shadow beneath the pack */}
@@ -294,9 +400,9 @@ export default function BreadChapter() {
         </div>
 
         {/* chapter title, always readable for assistive tech */}
-        <h1 id="bread-heading" className="sr-only">
+        <h2 id="bread-heading" className="sr-only">
           KV Delight bread — a whole loaf, sliced, then sealed in its pack
-        </h1>
+        </h2>
         <p className="sr-only">
           The sequence runs in five scenes: a whole unsliced loaf; a serrated
           bread knife cutting nine cross-cuts; the slices separating one by one,
@@ -305,25 +411,33 @@ export default function BreadChapter() {
           Delight Sandwich Bread pack arrives.
         </p>
 
-        {/* captions */}
-        <div className="absolute inset-0 z-20 flex items-end pb-[16svh] sm:items-center sm:pb-0">
-          <div className="mx-auto w-full max-w-[1500px] px-5 sm:px-10">
-            <div className="relative h-[36svh] w-full max-w-[34rem] sm:h-[40svh]">
+        {/*
+          Captions. Bottom-left on every viewport, deliberately.
+
+          The bread is framed into the box above this strip by `sliceLayout`
+          (`CAPTION_BOX`), so the loaf and the headline can never meet at any
+          progress value on any aspect ratio — the guarantee is arithmetic, not
+          a tuned margin. Height is reserved in svh so the block does not jump
+          when a longer beat fades in.
+        */}
+        <div className="absolute inset-0 z-20 flex items-end">
+          <div className="mx-auto w-full max-w-[1500px] px-5 pb-[max(1.1rem,env(safe-area-inset-bottom))] sm:px-10 sm:pb-[6svh]">
+            <div className="relative h-[32svh] w-full max-w-[34rem] sm:h-[30svh]">
               {BEATS.map((beat, i) => (
                 <div
                   key={beat.index}
                   ref={(el) => {
                     beatRefs.current[i] = el;
                   }}
-                  className="absolute inset-0 flex flex-col justify-end opacity-0 will-change-transform sm:justify-center"
+                  className="absolute inset-0 flex flex-col justify-end opacity-0 will-change-transform"
                 >
                   <p className="eyebrow">
                     {beat.index} — {beat.kicker}
                   </p>
-                  <p className="display mt-4 whitespace-pre-line text-[10.5vw] leading-[0.88] sm:text-[4.1vw]">
+                  <p className="display mt-3 whitespace-pre-line text-[clamp(2.05rem,9vw,2.9rem)] leading-[0.9] sm:mt-4 sm:text-[clamp(2rem,3.3vw,3.2rem)]">
                     {beat.title}
                   </p>
-                  <p className="mt-5 max-w-md text-[0.82rem] leading-relaxed text-cream-dim sm:text-sm">
+                  <p className="mt-3 max-w-sm text-[0.82rem] leading-relaxed text-cream-dim sm:mt-4 sm:text-[0.9rem] [@media(max-height:520px)]:hidden">
                     {beat.body}
                   </p>
                 </div>
@@ -347,15 +461,6 @@ export default function BreadChapter() {
               The same loaf, cut and wrapped — wherever it is going next.
             </p>
           </div>
-        </div>
-
-        {/* opening cue */}
-        <div
-          ref={cueRef}
-          className="absolute inset-x-0 bottom-6 z-30 flex flex-col items-center gap-2"
-        >
-          <span className="eyebrow">Scroll to explore</span>
-          <span className="block h-10 w-px bg-gradient-to-b from-cream/60 to-transparent" />
         </div>
       </div>
     </section>

@@ -2,12 +2,14 @@
 
 @theme {
   --color-ink: #120b06;
+  --color-ink-deep: #0a0603;
   --color-ink-soft: #1d120a;
   --color-cream: #f7efe1;
   --color-cream-dim: #cbb9a0;
   --color-crust: #c98a3f;
   --color-crust-deep: #7a4519;
   --color-gold: #e6b45c;
+  --color-gold-deep: #b5813a;
   --color-brand-red: #d12026;
   --color-brand-green: #14653a;
 
@@ -74,6 +76,69 @@ body {
   );
 }
 
+/* ------------------------------------------------------------------ brand -- */
+/*
+ * The badge is supplied artwork: it is never recoloured, never glow-treated and
+ * never placed on a light tile. Its legibility comes from the cream wordmark set
+ * beside it — at 44 px the red script inside the badge is unreadable on ink
+ * (3.7:1), so the wordmark carries the name and the badge carries the character.
+ */
+.wordmark {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.26em;
+  line-height: 1;
+  color: var(--color-cream);
+}
+
+.tagline {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  line-height: 1.4;
+  color: var(--color-cream-dim);
+}
+
+/*
+ * The 3D stage is mounted late (see BreadChapter). When it does arrive — usually
+ * while the hero is still on screen — it fades in rather than swapping in.
+ */
+.stage-enter {
+  animation: stage-enter 600ms var(--ease-cine) both;
+}
+
+@keyframes stage-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* A hairline rule in the shelf gold, used to bind lockups to the page. */
+.rule-gold {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-gold) 90%, transparent),
+    color-mix(in srgb, var(--color-gold) 0%, transparent)
+  );
+}
+
+/* The hero photograph melts into the ink instead of ending on a hard edge. */
+.loaf-plate {
+  -webkit-mask-image: radial-gradient(
+    128% 116% at 52% 48%,
+    #000 46%,
+    rgba(0, 0, 0, 0.86) 68%,
+    transparent 92%
+  );
+  mask-image: radial-gradient(
+    128% 116% at 52% 48%,
+    #000 46%,
+    rgba(0, 0, 0, 0.86) 68%,
+    transparent 92%
+  );
+}
+
 .eyebrow {
   font-size: 0.68rem;
   letter-spacing: 0.32em;
@@ -102,7 +167,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .film-grain::before,
-  .vignette::after {
+  .vignette::after,
+  .stage-enter {
     animation: none !important;
   }
   .film-grain::before {
