@@ -1,62 +1,67 @@
 /**
  * Choreography for chapter three — the cream bun.
  *
- * Same contract as the bread and bun chapters: this file is pure maths, read by
- * both the DOM side (captions, packaging hand-off) and the WebGL side (poses,
- * camera), so a caption can never describe something the model is not doing.
+ * Same contract as the bread and buns chapters: pure maths, read by both the DOM
+ * side (captions, packaging hand-off) and the WebGL side (poses, camera), so a
+ * caption can never describe something the model is not doing.
  *
- * The story, in the order the brief asks for it:
+ * The product is a *long* roll — the four-pack in `public/assets/brand` shows it
+ * split lengthwise with cream along the whole seam, and the cross-section
+ * photograph shows a deep cream layer inside. So the story is told along the
+ * length, not around a circle:
  *
- *   0.00 → 0.14   A · the bake     one cream bun, closed, lit, barely turning
- *   0.14 → 0.31   B · the opening  the top half lifts and hinges back
- *   0.30 → 0.58   C · the pipe     a nozzle descends and pipes cream into it
- *   0.58 → 0.76   D · closed       the halves come together, cream at the seam
- *   0.76 → 0.86   E · the turn     one slow turn to the finished bun
- *   0.86 → 1.00   F · the pack     the supplied four-pack takes the frame
+ *   0.00 → 0.10   A · the bun      one elongated bun, three-quarter, closed
+ *   0.10 → 0.26   B · the seam     the lid hinges back along the long axis
+ *   0.27 → 0.52   C · the pipe     the nozzle runs the length, cream behind it
+ *   0.53 → 0.64   D · closed       the lid comes down on the cream
+ *   0.64 → 0.74   E · the turn     one slow turn of the finished bun
+ *   0.74 → 0.84   F · the cut      the near end is clipped away: cross-section
+ *   0.86 → 0.96   G · the pack     the supplied four-pack takes the frame
  *
- * There is nothing invented here. The bun shell is the same geometry the soft
- * buns chapter uses (`lib/bun`), the cream is cream, and the pack is the brand's
- * own photograph of the product.
+ * Nothing here invents a product. The shell is `lib/creamBun`, the cream is
+ * cream, and the pack is the brand's own photograph.
  */
 
 import { clamp01, smoothstep, bell, lerp } from "@/lib/choreography";
 
 export { clamp01, smoothstep, bell, lerp };
 
-/** The shell reuses the soft bun's dimensions exactly. */
+/** Dimensions of the shell, mirrored from `lib/creamBun` for the camera maths. */
 export const CREAM = {
-  radius: 1,
-  height: 0.88,
-  cutY: 0.36,
-  /**
-   * Piped cream sits **on** the cut face, not inside the bun.
-   *
-   * The bottom half is a closed solid: its cut face is an opaque crumb disc at
-   * `cutY`. Cream modelled below that plane is cream in a box, and it never
-   * appears on screen. So the fill starts just above the disc and mounds up from
-   * there, which is also what a cream bun actually looks like.
-   */
-  fillBase: 0.36,
-  fillTop: 0.64,
+  halfLength: 1.16,
+  halfWidth: 0.5,
+  height: 0.94,
+  cutY: 0.4,
+  cream: 0.06,
+  /** Where the section is taken, and the plane the near end is clipped at. */
+  cutX: 0.46,
+  /** Radius of the piped rope, and how far it is squashed vertically. */
+  ropeRadius: 0.13,
+  ropeFlatten: 0.62,
 } as const;
 
-/** The cream camera matches the bun camera, so the two chapters feel like one film. */
+/** Height of the rope's crown: a piped rope is wider than it is tall. */
+export const ROPE_Y =
+  CREAM.cutY + CREAM.ropeRadius * CREAM.ropeFlatten * 1.9;
+
 export const CREAM_FOV = 32;
 
 export const TIMELINE = {
-  revealEnd: 0.14,
-  openStart: 0.14,
-  openEnd: 0.31,
-  fillStart: 0.3,
-  fillEnd: 0.58,
-  closeStart: 0.58,
-  closeEnd: 0.76,
-  turnStart: 0.76,
-  turnEnd: 0.86,
+  revealEnd: 0.1,
+  openStart: 0.1,
+  openEnd: 0.26,
+  fillStart: 0.27,
+  fillEnd: 0.52,
+  closeStart: 0.53,
+  closeEnd: 0.64,
+  turnStart: 0.64,
+  turnEnd: 0.74,
+  cutStart: 0.74,
+  cutEnd: 0.84,
   packIn: 0.86,
-  packInEnd: 0.95,
+  packInEnd: 0.955,
   packCopy: 0.9,
-  packCopyEnd: 0.985,
+  packCopyEnd: 0.99,
 } as const;
 
 export type Beat = {
@@ -70,125 +75,116 @@ export type Beat = {
 export const BEATS: Beat[] = [
   {
     index: "01",
-    kicker: "The bake",
-    title: "One bun,\nready",
-    body: "A soft golden shell, baked the same afternoon as the rest of the shelf. This is the whole bun before anything goes into it.",
-    window: [-0.5, 0.145],
+    kicker: "The bun",
+    title: "One long\nbun",
+    body: "The cream bun is a soft roll, baked long rather than round — domed gold on top, pale where it met the tray.",
+    window: [-0.5, 0.105],
   },
   {
     index: "02",
-    kicker: "The opening",
-    title: "Open at\nthe seam",
-    body: "The top half lifts along its own seam and hinges back, so the empty middle is a real opening rather than a cut made for the camera.",
-    window: [0.155, 0.315],
+    kicker: "The seam",
+    title: "Opened\nlengthways",
+    body: "It splits along its own seam, the way a roll actually opens: one half hinging back on the other, crumb on both faces.",
+    window: [0.115, 0.27],
   },
   {
     index: "03",
     kicker: "The pipe",
-    title: "Cream,\npiped in",
-    body: "A piping nozzle comes down and lays cream into the bun in a single ringed pass, one turn at a time, until it reaches the rim.",
-    window: [0.335, 0.575],
+    title: "Cream,\nend to end",
+    body: "The nozzle travels the length of the bun and lays one continuous rope of cream, ridged by the tip, settling as it goes.",
+    window: [0.29, 0.52],
   },
   {
     index: "04",
-    kicker: "Closed",
-    title: "Sealed\nby hand",
-    body: "The top comes back down and the cream settles into the seam — the finished bun, exactly as it goes into the pack.",
-    window: [0.6, 0.855],
+    kicker: "The cut",
+    title: "What is\ninside",
+    body: "Closed, then cut across: the cream reads as one deep layer through the bread, not a slab pressed between two halves.",
+    window: [0.575, 0.845],
   },
 ];
 
 /* ---------------------------------------------------------------- opening -- */
 
 export type Open = {
-  /** 0 = closed. */
+  /** 0 = closed, 1 = fully hinged back. */
   open: number;
-  /** How far the top half has risen above the cut plane. */
-  lift: number;
-  /** Radians the top half has hinged back. */
-  tilt: number;
+  /** Radians the lid has hinged about the bun's long axis. */
+  hinge: number;
 };
 
 /**
- * The halves part *before* the cream arrives and close *over* it.
+ * The lid hinges about X, along the far edge — an opened roll, not a lifted lid.
  *
- * The lift is smaller than the soft buns' — the top half only has to clear the
- * rim for the nozzle, and a bun that opens like a hinge of bread would read as a
- * different product.
+ * A lid that rises straight up reads as a levitating cap from the side, and on a
+ * phone it also parks itself in front of the opening. Hinging at the far edge
+ * tips it away from the camera, so the inside of the bun faces the viewer for
+ * the whole time the nozzle is working.
  */
 export function openAt(p: number): Open {
   const open =
     smoothstep(TIMELINE.openStart, TIMELINE.openEnd, p) *
     (1 - smoothstep(TIMELINE.closeStart, TIMELINE.closeEnd, p));
-  // The lid has to clear the nozzle, so it lifts more than it tilts: a lid
-  // that leans back at this scale hides the opening from a phone's camera.
-  return { open, lift: 0.78 * open, tilt: -0.55 * open };
+  return { open, hinge: -1.16 * open };
 }
 
 /* ------------------------------------------------------------------ cream -- */
 
 /**
- * How much of the bun has been filled, 0 → 1.
+ * How much of the rope has been laid, 0 → 1.
  *
- * Deliberately linear-ish while the nozzle is down: cream leaving a nozzle at a
- * constant rate should look like it is leaving at a constant rate. The short
- * ease at each end is the nozzle settling, not the cream hesitating.
+ * Nearly linear between the ends: cream leaving a nozzle at a constant rate
+ * should look like it is leaving at a constant rate. Only the first and last few
+ * percent ease, which is the nozzle touching down and lifting off.
  */
 export function fillAt(p: number): number {
-  const rise = smoothstep(TIMELINE.fillStart, TIMELINE.fillEnd, p);
-  return clamp01(rise * 0.98 + 0.02 * smoothstep(TIMELINE.fillStart, TIMELINE.fillStart + 0.06, p));
+  const t = clamp01(
+    (p - TIMELINE.fillStart) / (TIMELINE.fillEnd - TIMELINE.fillStart),
+  );
+  const eased = 0.04 * smoothstep(0, 0.12, t) + 0.92 * t + 0.04 * smoothstep(0.9, 1, t);
+  return clamp01(p < TIMELINE.fillStart ? 0 : eased);
+}
+
+/** The nozzle's world position while it is piping. */
+export function nozzleAt(p: number): { x: number; y: number; visible: number } {
+  const xEnd = CREAM.halfLength * 0.94;
+  const arrive = smoothstep(
+    TIMELINE.fillStart - 0.045,
+    TIMELINE.fillStart + 0.012,
+    p,
+  );
+  const leave = smoothstep(TIMELINE.fillEnd - 0.03, TIMELINE.fillEnd + 0.012, p);
+  const f = fillAt(p);
+
+  // The tip leads the rope by a hair: cream appears *under* it, never behind it.
+  const x = -xEnd + 2 * xEnd * Math.min(1, f + 0.012);
+  // The tip hovers just above the rope, and lifts clear once the run is done.
+  const y = ROPE_Y + 0.05 + leave * 0.55;
+
+  return { x, y, visible: arrive * (1 - leave) };
+}
+
+/** The cream layer between the halves: only exists as the bun closes. */
+export function creamLayerAt(p: number): number {
+  return smoothstep(TIMELINE.closeStart + 0.01, TIMELINE.closeEnd - 0.015, p);
+}
+
+/** 0 → 1 as the near end is clipped away for the cross-section. */
+export function cutAt(p: number): number {
+  return smoothstep(TIMELINE.cutStart, TIMELINE.cutEnd, p);
 }
 
 /**
- * The nozzle's height above the board.
+ * Where the clip plane sits, in bun-space X.
  *
- * It starts off-frame, drops to the cream surface, then rides up with the fill
- * so the tip always sits just above what it has just piped — a nozzle that stays
- * put while the cream rises buries itself in its own output, which is the one
- * detail that gives a piped fill away.
+ * The knife sweeps in from beyond the near end down to the section plane rather
+ * than switching on: a plane that jumps removes a third of the bun in one frame,
+ * which is the one thing the cut beat must not do.
  */
-export function nozzleAt(p: number): { y: number; spin: number; visible: number } {
-  const inStart = TIMELINE.fillStart - 0.055;
-  const arrive = smoothstep(inStart, TIMELINE.fillStart + 0.03, p);
-  // A slower retract than the drop: the tip has further to travel to clear the
-  // closing top half, and a nozzle that snaps out reads as a cut, not a move.
-  const leave = smoothstep(TIMELINE.fillEnd - 0.05, TIMELINE.fillEnd + 0.01, p);
-
-  // The tip rides just above the cream it has already piped. A nozzle that
-  // stayed put while the fill rose would bury its own tip in the cream, which is
-  // the one detail that gives a piped fill away.
-  const surface = creamSurfaceAt(p);
-  const parked = 2.7;
-  const tip = surface + 0.12;
-  const y = parked + (tip - parked) * arrive + leave * 2.1;
-
-  return {
-    y,
-    // A quarter turn through the pass: the ring of the piped cream has to come
-    // from somewhere, and a static nozzle piping a spiral is the tell.
-    spin:
-      clamp01(
-        (p - TIMELINE.fillStart) / (TIMELINE.fillEnd - TIMELINE.fillStart),
-      ) *
-      Math.PI *
-      1.7,
-    visible: arrive * (1 - leave),
-  };
-}
-
-/** Height of the cream's top surface, from the first ring to the rim. */
-export function creamSurfaceAt(p: number): number {
-  return CREAM.fillBase + fillAt(p) * (CREAM.fillTop - CREAM.fillBase);
-}
-
-/**
- * The cream that squeezes out at the seam as the halves meet.
- *
- * It only exists once the bun is closing: cream appears when it is squeezed, not
- * before. `0 → 1` is the bulge's growth; it holds after the close.
- */
-export function seamCreamAt(p: number): number {
-  return smoothstep(TIMELINE.closeStart + 0.02, TIMELINE.closeEnd - 0.03, p);
+export function clipXAt(p: number): number {
+  const c = cutAt(p);
+  const start = CREAM.halfLength + 0.06;
+  if (c < 0.002) return start;
+  return start - c * (start - CREAM.cutX);
 }
 
 /* ----------------------------------------------------------------- bounds -- */
@@ -205,56 +201,69 @@ export type Bounds = {
 type Vec3 = { x: number; y: number; z: number };
 
 /**
- * Everything in frame, as one box: the bun (with the top half where the hinge
- * has put it), the cream, and — only while it is actually on screen — the
- * nozzle above it.
+ * Everything in frame as one box: the shell (with the lid where the hinge has
+ * put it), the cream, and the nozzle only while it is actually on screen.
  *
- * The nozzle is inside the bounds on purpose. Framing the bun alone would push
- * the nozzle's tip out of the top of a phone screen during the pipe scene, and
- * the pipe is the scene. Excluding it while it is off-frame keeps the opening
- * wide shot wide.
+ * The clipped end is excluded once the cut starts, so cutting does not suddenly
+ * pull the camera back for a bun that is no longer there.
  */
 export function creamBounds(p: number): Bounds {
-  const open = openAt(p);
-  const r = CREAM.radius;
+  const hingeState = openAt(p);
+  const open = hingeState.open;
   const pts: Vec3[] = [];
+  const { halfLength, halfWidth, height, cutY, cream } = CREAM;
+  const cut = cutAt(p);
+  const maxX = cut > 0.002 ? Math.min(halfLength, clipXAt(p)) : halfLength;
 
-  for (const x of [-r, r]) {
-    for (const y of [0, CREAM.cutY]) {
-      for (const z of [-r, r]) pts.push({ x, y, z });
+  for (const x of [-halfLength, maxX]) {
+    for (const z of [-halfWidth, halfWidth]) {
+      pts.push({ x, y: 0, z });
+      if (cut < 0.5) pts.push({ x, y: cutY, z });
     }
   }
 
-  const c = Math.cos(open.tilt);
-  const s = Math.sin(open.tilt);
-  for (const x of [-r, r]) {
-    for (const y of [CREAM.cutY, CREAM.height]) {
-      for (const z of [-r, r]) {
-        const ly = y - CREAM.cutY;
-        pts.push({
-          x,
-          y: CREAM.cutY + (ly * c - z * s) + open.lift,
-          z: ly * s + z * c,
-        });
+  // The lid: a box hinged about the long axis at the far edge.
+  if (open > 0.001) {
+    const pivotY = cutY + cream;
+    const pivotZ = -halfWidth * 0.92;
+    const c = Math.cos(hingeState.hinge);
+    const s = Math.sin(hingeState.hinge);
+    for (const x of [-halfLength, maxX]) {
+      for (const y of [pivotY, height]) {
+        for (const z of [-halfWidth, halfWidth]) {
+          const dy = y - pivotY;
+          const dz = z - pivotZ;
+
+          pts.push({
+            x,
+            y: pivotY + dy * c - dz * s,
+            z: pivotZ + dy * s + dz * c,
+          });
+        }
+      }
+    }
+  } else {
+    for (const x of [-halfLength, maxX]) {
+      for (const y of [cutY, height]) {
+        for (const z of [-halfWidth, halfWidth]) pts.push({ x, y, z });
       }
     }
   }
 
-  // Cream rises no higher than the rim while the bun is open, and bulges a
-  // little past it once the halves meet.
-  const fill = fillAt(p);
-  const seam = seamCreamAt(p);
-  pts.push({
-    x: 0,
-    y: CREAM.fillBase + fill * (CREAM.fillTop - CREAM.fillBase) + 0.08 * seam,
-    z: 0,
-  });
+  const rope = CREAM.ropeRadius;
+  const f = fillAt(p);
+  if (f > 0.001) {
+    const xr = -halfLength * 0.94 + 2 * halfLength * 0.94 * f;
+    pts.push({ x: xr, y: ROPE_Y + rope, z: -rope });
+    pts.push({ x: xr, y: ROPE_Y + rope, z: rope });
+  }
 
   const nozzle = nozzleAt(p);
-  if (nozzle.visible > 0.4) {
-    for (const x of [-0.2, 0.2]) {
-      for (const y of [nozzle.y, nozzle.y + 0.7]) {
-        for (const z of [-0.2, 0.2]) pts.push({ x, y, z });
+  if (nozzle.visible > 0.35) {
+    for (const dx of [-0.16, 0.16]) {
+      for (const dz of [-0.16, 0.16]) {
+        pts.push({ x: nozzle.x + dx, y: nozzle.y, z: dz });
+        pts.push({ x: nozzle.x + dx, y: nozzle.y + 0.3, z: dz });
       }
     }
   }
@@ -281,32 +290,21 @@ export type View = {
 const TAN_HALF = Math.tan((CREAM_FOV * Math.PI) / 180 / 2);
 
 /**
- * How much of the frame the content should fill, per scene.
+ * How much of the frame's height the content should fill.
  *
- * Base plus sequential increments, never a sum of stages: the stages run in
- * order, so adding them lets the total climb past 1 and drive the lens into the
- * product. The pipe scene is the closest shot, because that is where the detail
- * is; the opening and the pack are the widest.
+ * A long bun is limited by its *width* on a phone, so this stays modest and the
+ * distance is solved against both axes: measuring the bun's length as the thing
+ * to fit would leave the product small and the nozzle off-frame.
  */
 function zoomAt(p: number): number {
-  const reveal = 0.62 + 0.04 * smoothstep(0.02, TIMELINE.revealEnd, p);
-  const push = 0.08 * smoothstep(TIMELINE.openStart, 0.34, p);
-  const pipe = 0.06 * smoothstep(TIMELINE.fillStart, 0.46, p);
-  const pull = 0.1 * smoothstep(TIMELINE.closeStart, 0.8, p);
-  const leave = 1 - 0.6 * smoothstep(TIMELINE.packIn, TIMELINE.packInEnd, p);
-  return Math.max(0.2, (reveal + push + pipe - pull) * leave);
+  const reveal = 0.6 + 0.05 * smoothstep(0.01, TIMELINE.revealEnd, p);
+  const open = 0.05 * smoothstep(TIMELINE.openStart, 0.3, p);
+  const pipe = 0.05 * smoothstep(TIMELINE.fillStart, 0.44, p);
+  const cut = 0.1 * smoothstep(TIMELINE.turnStart, TIMELINE.cutEnd, p);
+  const leave = 1 - 0.55 * smoothstep(TIMELINE.packIn, TIMELINE.packInEnd, p);
+  return Math.max(0.2, (reveal + open + pipe + cut) * leave);
 }
 
-/**
- * The cream camera.
- *
- * Built the same way as the bun camera, and for the same reason: a phone limits
- * a round product by its *width*, so the distance has to be solved against both
- * axes, and the aim point is then nudged until the product's projected centre
- * lands in the band above the caption strip. Ten refinement steps against the
- * real projection, because the camera is tilted and a tilted camera does not map
- * world height to screen height linearly.
- */
 export function viewFor(p: number, aspect: number): View {
   const bounds = creamBounds(p);
   const yaw = creamYaw(p, aspect);
@@ -316,30 +314,19 @@ export function viewFor(p: number, aspect: number): View {
   const centreY = (bounds.minY + bounds.maxY) / 2;
   const portrait = aspect < 0.85;
 
-  // The caption strip owns the bottom of a portrait screen, so the band is
-  // higher there: product above the reading line, words below it.
-  const bandTop = 0.1;
-  const bandBottom = portrait ? 0.66 : 0.68;
-  const band = bandBottom - bandTop;
-  const maxW = portrait ? 0.86 : 0.8;
-
-  // Never ask for more height than the band has. On a desktop the nozzle makes
-  // the content taller than the space above the captions, and a zoom that
-  // ignores that clips the nozzle off the top of the screen.
-  const zoom = Math.min(zoomAt(p), band * 0.97);
-
+  // The caption strip owns the bottom of a portrait screen, so the product sits
+  // above the reading line and the words sit below it.
+  const bandTop = 0.09;
+  const bandBottom = portrait ? 0.62 : 0.74;
+  const bandH = bandBottom - bandTop;
+  const target = (bandTop + bandBottom) / 2;
+  const maxW = portrait ? 0.9 : 0.84;
+  const zoom = Math.min(zoomAt(p), bandH * 0.94);
   const front = ext.depth / 2;
-  let camZ =
-    Math.max(
-      contentH / (2 * TAN_HALF * zoom),
-      ext.width / (2 * TAN_HALF * aspect * maxW),
-      1.2,
-    ) + front;
 
-  // A low, gently tilted camera: steep angles foreshorten the nozzle so hard
-  // that the pinhole estimate stops holding, and the solve below has to fight
-  // the geometry instead of the framing.
-  const camY = centreY + 0.62;
+  // A low three-quarter camera: high enough to see into the opened bun, low
+  // enough that the long shape is not foreshortened into a disc.
+  const camY = centreY + Math.max(0.5, contentH * 0.55);
 
   /**
    * Aim point, solved rather than estimated.
@@ -348,21 +335,21 @@ export function viewFor(p: number, aspect: number): View {
    * camera is tilted and the product has depth — so this bisects on the real
    * projection until the measured centre lands on the band centre.
    */
-  const solve = (z: number) => {
-    const halfH = TAN_HALF * Math.max(0.2, z - front);
-    const target = (bandTop + bandBottom) / 2;
+  const solveLook = (camZ: number) => {
+    const halfH = TAN_HALF * Math.max(0.2, camZ - front);
     let lo = centreY - 4 * halfH;
     let hi = centreY + 4 * halfH;
     let best = centreY;
     let bestErr = Infinity;
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 24; i++) {
       const mid = (lo + hi) / 2;
-      const rect = projectRect(bounds, yaw, { camY, camZ: z, lookY: mid }, aspect);
+      const rect = projectRect(bounds, yaw, { camY, camZ, lookY: mid }, aspect);
       const err = (rect.top + rect.bottom) / 2 - target;
-      if (Math.abs(err) < bestErr) {
+      if (Number.isFinite(err) && Math.abs(err) < bestErr) {
         bestErr = Math.abs(err);
         best = mid;
       }
+      if (!Number.isFinite(err)) break;
       // Measured centre below the target (bigger fraction = lower on screen)
       // means the aim point is too high: look lower.
       if (err > 0) hi = mid;
@@ -371,15 +358,31 @@ export function viewFor(p: number, aspect: number): View {
     return best;
   };
 
-  let lookY = solve(camZ);
-  // One correction pass: if the solve still cannot fit the content in the band,
-  // the content is too tall for the distance and the camera has to give ground.
-  for (let pass = 0; pass < 3; pass++) {
+  let camZ =
+    Math.max(
+      contentH / (2 * TAN_HALF * zoom),
+      ext.width / (2 * TAN_HALF * aspect * maxW),
+      1.2,
+    ) + front;
+  let lookY = solveLook(camZ);
+
+  /**
+   * Safety net: the perspective camera projects the corners *outside* the
+   * pinhole box, and a tilted camera does not map world height to screen
+   * height linearly, so a fit that looks right on paper can still clip the
+   * nozzle. Measure, then give ground until it fits.
+   */
+  for (let pass = 0; pass < 5; pass++) {
     const rect = projectRect(bounds, yaw, { camY, camZ, lookY }, aspect);
-    const projected = rect.bottom - rect.top;
-    if (projected <= band * 0.995) break;
-    camZ *= projected / (band * 0.96);
-    lookY = solve(camZ);
+    const over = Math.max(
+      0.015 - rect.top,
+      rect.bottom - 0.985,
+      0.015 - rect.left,
+      rect.right - 0.985,
+    );
+    if (!Number.isFinite(over) || over <= 0) break;
+    camZ *= 1 + Math.max(0.03, over * 1.6);
+    lookY = solveLook(camZ);
   }
 
   return { camZ, camY, lookY, yaw };
@@ -388,19 +391,16 @@ export function viewFor(p: number, aspect: number): View {
 /**
  * The turn.
  *
- * Almost nothing early — a staged reveal, not a turntable — then one slow turn
- * once the bun is closed, which is the only motion the finished product gets.
+ * Three-quarter for the reveal — the length and the rounded ends have to read
+ * immediately — then a slow turn, then round to face the cut.
  */
 export function creamYaw(p: number, aspect: number): number {
-  const base = aspect < 0.85 ? -0.1 : -0.24;
-  const turn = smoothstep(TIMELINE.turnStart, TIMELINE.turnEnd, p);
-  return base + 0.14 * smoothstep(0, 0.2, p) + 0.5 * turn;
-}
-
-function rotateX(v: Vec3, a: number): Vec3 {
-  const c = Math.cos(a);
-  const s = Math.sin(a);
-  return { x: v.x, y: v.y * c - v.z * s, z: v.y * s + v.z * c };
+  const base = aspect < 0.85 ? -0.36 : -0.44;
+  // Three-quarter, then slowly round to the near end so the cut is looked at
+  // face-on. Turning the *other* way would hide the section behind the bun.
+  const turn = 0.5 * smoothstep(TIMELINE.turnStart, TIMELINE.turnEnd, p);
+  const face = 0.5 * smoothstep(TIMELINE.cutStart, TIMELINE.cutEnd, p);
+  return base + 0.06 * smoothstep(0, TIMELINE.openEnd, p) - turn - face;
 }
 
 function rotatedExtent(bounds: Bounds, yaw: number) {
@@ -439,13 +439,8 @@ export function projectRect(
     y: (view.lookY - view.camY) / fLen,
     z: -view.camZ / fLen,
   };
-  // Right vector of a camera that only rotates about X.
   const right = { x: 1, y: 0, z: 0 };
-  const up = {
-    x: 0,
-    y: -forward.z,
-    z: forward.y,
-  };
+  const up = { x: 0, y: -forward.z, z: forward.y };
 
   const c = Math.cos(yaw);
   const s = Math.sin(yaw);
@@ -464,7 +459,8 @@ export function projectRect(
         const dz = wz - camPos.z;
         const depth = dx * forward.x + dy * forward.y + dz * forward.z;
         if (depth <= 0.01) continue;
-        const sx = (dx * right.x + dy * right.y + dz * right.z) / (depth * TAN_HALF * aspect);
+        const sx =
+          (dx * right.x + dy * right.y + dz * right.z) / (depth * TAN_HALF * aspect);
         const sy = (dx * up.x + dy * up.y + dz * up.z) / (depth * TAN_HALF);
         left = Math.min(left, 0.5 + sx * 0.5);
         rightMost = Math.max(rightMost, 0.5 + sx * 0.5);

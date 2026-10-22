@@ -35,8 +35,9 @@ Nothing is fetched from a third party at build time or at runtime.
 | `src/lib/bun.ts` | **Pre-separated bun halves**: two closed solids, each with a crust shell and a crumb cut face. No runtime cutting. |
 | `src/lib/bunChoreography.ts` | Bun timings, press/split maths, camera framing and the screen-space guarantee that keeps the bun off the captions. |
 | `src/components/story/CreamChapter.tsx` | Chapter three's DOM and scroll driver: four caption beats, the four-pack hand-off, reduced-motion document. |
-| `src/components/three/CreamStage.tsx` | The cream bun's three.js stage: shell halves, piped cream rings, steel nozzle and stream, camera, on-demand render loop. |
-| `src/lib/creamChoreography.ts` | Cream timings, the open/fill/close schedule, the nozzle's ride, camera framing solved against the real projection. |
+| `src/components/three/CreamStage.tsx` | The cream bun's three.js stage: elongated shell halves, the hinged lid, the piped rope and its draw range, steel nozzle and stream, the clip plane and section face, camera, on-demand render loop. |
+| `src/lib/creamBun.ts` | The cream bun's own geometry: superellipse plan swept by a dome profile, built halves with crumb faces, cream rope, seam layer, section face. |
+| `src/lib/creamChoreography.ts` | Cream timings, the hinge/fill/close/cut schedule, the nozzle's run along the long axis, camera framing solved against the real projection. |
 | `src/lib/sections.ts` | The chapter list — one source of truth for the ids in the page and the labels in the header. |
 | `src/lib/slices.ts` | **Sliced loaf geometry**: ten closed slabs, each with a crust shell, crumb cut faces and a crust rim. |
 | `src/lib/knife.ts` | Serrated bread knife, built from geometry (extruded profile + handle + rivets). |
@@ -218,55 +219,80 @@ Both follow chapter one's contract, and both were built by it:
 
 | | chapter two — soft buns | chapter three — cream buns |
 |---|---|---|
-| section | `#buns`, `h-[380svh] sm:h-[400svh]` | `#cream-buns`, `h-[360svh] sm:h-[380svh]` |
-| product | one bun, pressed, split, closed | one bun, opened, piped, closed |
-| geometry | `lib/bun.ts` halves | the same halves, plus cream and a nozzle |
+| section | `#buns`, `h-[380svh] sm:h-[400svh]` | `#cream-buns`, `h-[400svh] sm:h-[430svh]` |
+| product | one bun, pressed, split, closed | one *long* bun, hinged, piped, closed, cut |
+| geometry | `lib/bun.ts` halves | `lib/creamBun.ts` — its own elongated shell |
 | packaging | supplied eight-pack | supplied four-pack |
 | fallback | the eight-pack still | the four-pack still |
 | choreography | `lib/bunChoreography.ts` | `lib/creamChoreography.ts` |
 
-The cream bun is not a new product invented for the page: the shell is chapter
-two's bun, the cream is a stack of piped rings, and the pack is the brand's own
-four-pack photograph. The nozzle is a half-metal cylinder group, because a fully
-metallic material with no environment map renders black — a deliberate trade of
-physically-correct steel for something that reads as steel on a phone at one
-material's cost.
+### Why the cream bun is not chapter two's bun
 
-The cream camera solves its framing against the real projection rather than
-estimating it: distance is fitted to both axes (a phone limits a round product by
-its width, not its height), the aim point is bisected until the product's centre
-lands in the band above the caption strip, and if the content is still too tall
-for the band the camera gives ground instead of clipping the nozzle. Run
-`npx tsx` against `creamChoreography` to print the projected rectangle at any
-progress and aspect; that is how the caption clearance was checked without a
-browser.
+It was, and that was wrong. Chapter two's shell is a round bun of radius 1 — a
+hamburger shape — while the four-pack shows a roll roughly **2.3 : 1 long** with
+cream along the seam. `lib/creamBun.ts` therefore builds its own shell: a
+superellipse in plan (a rounded rectangle, exponent 2.9) swept along X and scaled
+by a dome profile, so the flanks stay full up to about three quarters of the
+height, the ends are rounded rather than pointed, and the base tucks in where it
+meets the tray. Two things keep it honest:
+
+- **The profile exponent matters.** A low exponent rounds the dome off almost
+  immediately and the result reads as a lens or a macaron; `3.1 / 0.46` was the
+  first attempt and looked exactly like that. `4.2 / 0.42` holds the shoulder and
+  only then rounds over.
+- **The seam sits below the widest point** (cut at 43 % of the height), which is
+  where the cream line sits in the pack photograph, not at mid-height.
+
+The bun is two pre-separated solids — bottom (0 → cut) and lid (cut + cream →
+crown), each closed, each with a baked rim and a real crumb disc — plus a cream
+layer between them. Nothing is boolean-cut at run time. The section in the last
+beat is a **clip plane** through the closed bun plus a built section face at that
+plane, so what you see cut is the same geometry you saw whole.
+
+The cream is a tube along the long axis, revealed by `setDrawRange` station by
+station as the nozzle advances, so the cream appears *behind* the tip at exactly
+the rate the tip travels. It is squashed vertically (0.62) because a piped rope
+is wider than it is tall, and ridged by a shallow scallop in its radius — no
+fluid simulation, no physics.
 
 ### Chapter three's scenes
 
 | `p` | scene | what happens |
 |---|---|---|
-| 0.00 → 0.14 | **A · The bake** | One closed cream bun, lit, barely turning. |
-| 0.14 → 0.31 | **B · The opening** | The top half lifts on its seam and hinges back. |
-| 0.30 → 0.58 | **C · The pipe** | A nozzle descends, rides up with the fill and lays cream in three piped ridges. |
-| 0.58 → 0.76 | **D · Closed** | The halves meet; the fill compresses and a little cream shows at the seam. |
-| 0.76 → 0.86 | **E · The turn** | One slow turn to the finished bun, camera pulling back. |
-| 0.86 → 1.00 | **F · The pack** | The supplied four-pack takes the frame; its caption arrives last. |
+| 0.00 → 0.10 | **A · The bun** | One long bun, three-quarter, closed, in the dark. |
+| 0.10 → 0.26 | **B · The seam** | The lid hinges back along the long axis; the crumb opens up. |
+| 0.27 → 0.52 | **C · The pipe** | The nozzle runs the length, laying a continuous rope behind it. |
+| 0.53 → 0.64 | **D · Closed** | The lid comes down on the cream; the seam shows a white line. |
+| 0.64 → 0.74 | **E · The turn** | One slow turn of the finished bun. |
+| 0.74 → 0.84 | **F · The cut** | The near end is clipped away: crumb, cream band, section. |
+| 0.86 → 1.00 | **G · The pack** | The supplied four-pack takes the frame; its caption arrives last. |
 
-Two bugs in it were found by rendering the geometry, not by reading the code:
+The camera solves its framing against the real projection rather than estimating
+it: distance is fitted to both axes, the aim point is bisected until the
+product's centre lands in the band above the caption strip, and if the content is
+still outside the frame after a measurement the camera gives ground instead of
+clipping the nozzle. Run `npx tsx` against `creamChoreography` to print the
+projected rectangle at any progress and aspect; that is how caption clearance was
+checked without a browser.
 
-1. **The cream was piped inside a closed solid.** The first version stacked the
-   rings from y = 0.1, below the bun's cut plane at 0.36 — and because the bottom
-   half's cut face is an opaque crumb disc, the fill was literally in a box. It
-   never appeared on screen. The fill now starts on the cut face.
-2. **The cream mound reached through the crown.** A hemisphere of radius 0.66 is
-   0.66 tall before it is squashed; scaling it by `filled` alone put its apex
-   above the bun's 0.88-high crown, so the closed bun wore a white cap. The
-   vertical scale is now `filled × (YMAX / R)`.
+Three bugs in the first elongated build were found by rendering the geometry, not
+by reading the code:
 
-Both were invisible in the type checker, in the build and in the SSR markup. They
-were visible in a 40-line software rasteriser (z-buffer, the real geometry, the
-real camera and the stage's light directions) — that is the closest thing to a
-screenshot this sandbox allows.
+1. **The clip plane cut across the wrong axis.** `THREE.Plane` is in world space,
+   and the bun is rotated by its yaw, so a plane at world X sliced the roll
+   lengthwise instead of across. The plane now turns with the bun
+   (`normal = (-cos yaw, 0, sin yaw)`), and the software renderer clips on model X
+   for the same reason.
+2. **The section face was offset twice** — built at the cut's X and then moved
+   there again — so it floated outside the bun and showed as a hoop.
+3. **The nozzle and rope were too small to read.** At this framing a real-scale
+   tip disappears into the crumb; the collar is now 0.17 world units and the rope
+   0.13 with a 0.62 squash, which is what makes the fill legible on a phone.
+
+All three were invisible in the type checker, the build and the SSR markup, and
+visible in a software rasteriser (z-buffer, the real geometry, the real poses and
+camera, the stage's light directions) — the closest thing to a screenshot this
+sandbox allows.
 
 The crust map is generated once per page and shared by all three stages
 (`getCrustTexture` in `lib/loaf.ts`, keyed by size) rather than three times.
@@ -279,8 +305,8 @@ were structural rather than cosmetic:
 1. **Fixed section heights with dead progress bands.** `#bread` was `520svh` with
    a hold-and-regroup tail that had no caption and little motion, and `#buns` was
    `480svh` whose first fifth was a black veil over a bun lit at 0.22. Heights are
-   now `460svh` / `380svh` / `360svh` — shorter, but still 3.6, 2.8 and 2.6
-   screens of scroll, so no stage lost its distance to tell its story.
+   now `460svh` / `380svh` / `400svh` — still 3.6, 3.0 and 3.2 screens of scroll,
+   so no stage lost its distance to tell its story.
 2. **A poster frame standing in for a product.** The buns chapter's opening veil
    is now 3.5% of the section instead of 4.5% of a dark screen, and the bun's key
    light starts at 0.62 instead of 0.22: the frame is never empty, only dim.
@@ -401,22 +427,32 @@ Remove the panel (and this section) once the device is confirmed healthy.
    (`public/assets/style/`), and the `style/` directory does not exist yet.
 7. **Every "cut" is two closed solids modelled to meet, not a mesh severed at
    runtime** — the loaf's ten slabs (`lib/slices.ts`), the soft bun's halves and
-   the cream bun's halves (`lib/bun.ts`) are all pre-separated geometry. Nothing
-   is sliced at run time, and the page says "opened along its own seam" rather
-   than implying otherwise.
-8. **Chapter three is verified by build, projection maths and SSR markup, not on
-   a screen.** There is no browser or GPU in the sandbox: the framing guarantee
-   comes from running `creamChoreography`'s projection at 375×812, 375×667,
-   414×896, 768×1024 and 1440×900, and the DOM comes from the served HTML. What
-   is not verified is how the piped cream *looks* in motion — that needs a phone.
+   the cream bun's halves (`lib/creamBun.ts`) are all pre-separated geometry. The
+   cream chapter's last beat is the one exception in kind: a clip plane through
+   the closed bun plus a section face modelled at that plane. Nothing is
+   boolean-sliced, and the page says "opened along its own seam" rather than
+   implying otherwise.
+8. **Chapter three is verified by build, projection maths, a software render and
+   SSR markup — not on a screen.** There is no browser or GPU in the sandbox: the
+   framing guarantee comes from running `creamChoreography`'s projection at
+   375×812, 375×667, 414×896, 768×1024 and 1440×900, the DOM from the served
+   HTML, and the geometry from a z-buffered software rasteriser that draws the
+   real meshes through the real poses. What that cannot tell you is how the crust
+   reads under ACES tone mapping, how the clip plane behaves on a real driver, or
+   how any of it *feels* while scrolling — that needs a phone.
 9. **Three WebGL stages** (loaf, bun, cream) each keep a context once they have
    been approached; each idles its render loop when off-screen, and the low tier
    drops their textures to 128² and removes antialiasing, but the contexts are not
    torn down and rebuilt. On a very old device that is the first thing to reclaim
    if memory becomes a problem.
-10. The cream bun's nozzle is deliberately semi-metallic (0.45) and lit by a
+10. The cream bun's nozzle is deliberately semi-metallic (0.55) and lit by a
     dedicated light: a fully metallic material without an environment map renders
     black. It reads as steel; it is not a physically exact steel.
+11. The cream bun's crust is **vertex colour, not a photographed texture** — a
+    baked-crust map was tried and rejected, because the shell's UVs run the long
+    way round and the map smeared into stripes. The mottling is procedural
+    (three incommensurate sine bands, plus a sub-millimetre displacement of the
+    wall); it reads as baked at phone size and will look flat in a 4K close-up.
 
 ### How chapter two was verified without a GPU
 
