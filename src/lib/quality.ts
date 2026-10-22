@@ -10,8 +10,11 @@
 
 export type QualityTier = "high" | "low";
 
+/** Tier name including the fallback rung, for logging. */
+export type AnyTier = QualityTier | "safe";
+
 export type QualitySettings = {
-  tier: QualityTier;
+  tier: AnyTier;
   /** Hard ceiling on devicePixelRatio. */
   maxPixelRatio: number;
   antialias: boolean;
@@ -27,6 +30,8 @@ export type QualitySettings = {
   extraLights: number;
   /** Physical (sheen/clearcoat) materials vs. plain standard ones. */
   physicalMaterials: boolean;
+  /** Texture anisotropy — cheap, but the first thing to drop on weak GPUs. */
+  anisotropy: boolean;
 };
 
 const HIGH: QualitySettings = {
@@ -42,6 +47,7 @@ const HIGH: QualitySettings = {
   environmentMap: true,
   extraLights: 6,
   physicalMaterials: true,
+  anisotropy: true,
 };
 
 const LOW: QualitySettings = {
@@ -57,6 +63,29 @@ const LOW: QualitySettings = {
   environmentMap: false,
   extraLights: 4,
   physicalMaterials: false,
+  anisotropy: true,
+};
+
+/**
+ * Last-resort configuration. Not offered as a tier: it is the rung the stage
+ * drops to if the requested tier throws during setup. Everything optional is
+ * off — no environment map, no physical materials, no antialiasing, no
+ * anisotropy — so that a GPU which chokes on one feature still plays the film.
+ */
+export const SAFE: QualitySettings = {
+  tier: "safe",
+  maxPixelRatio: 1,
+  antialias: false,
+  ringSegments: 14,
+  arcSteps: 4,
+  crustTexture: 64,
+  crumbTexture: 64,
+  bladeTexture: 64,
+  shadowTexture: 128,
+  environmentMap: false,
+  extraLights: 3,
+  physicalMaterials: false,
+  anisotropy: false,
 };
 
 export function settingsFor(tier: QualityTier): QualitySettings {

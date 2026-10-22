@@ -32,12 +32,19 @@ import {
   webgl2Supported,
 } from "@/lib/webgl";
 import {
+  SAFE,
   detectQualityTier,
   pixelRatioFor,
   settingsFor,
   type QualitySettings,
   type QualityTier,
 } from "@/lib/quality";
+import {
+  note,
+  reportError,
+  reportGl,
+  reportShader,
+} from "@/lib/diagnostics";
 import StageFallback from "@/components/three/StageFallback";
 
 type LoafStageProps = {
@@ -167,10 +174,32 @@ function createBreadScene({
     });
 
     const gl = renderer;
+    note("stage", `renderer created (tier=${settings.tier})`);
+
+    // Surface shader compile/link failures instead of three's silent console
+    // warning: on iOS these are a common cause of a blank-but-alive scene, and
+    // they are captured here so they appear in the on-screen report.
+    gl.debug.checkShaderErrors = true;
+    gl.debug.onShaderError = (ctx, program, vertexShader, fragmentShader) => {
+      const log = (shader: WebGLShader | null) =>
+        shader ? ctx.getShaderInfoLog(shader) ?? "" : "";
+      const detail = [
+        `program: ${ctx.getProgramInfoLog(program) ?? ""}`.trim(),
+        `vertex: ${log(vertexShader)}`.trim(),
+        `fragment: ${log(fragmentShader)}`.trim(),
+      ].join(" | ");
+      reportShader("shader", "shader compile/link failed", detail.slice(0, 1200));
+    };
+
     const caps = readCapabilities(gl);
     if (caps.notes.length) {
       console.info("[KV Delight] WebGL notes:", caps.notes.join("; "));
+      note("capabilities", caps.notes.join("; "));
     }
+    note(
+      "capabilities",
+      `maxTexture=${caps.maxTextureSize} floatRT=${caps.floatRenderTarget}`,
+    );
 
     gl.setPixelRatio(pixelRatioFor(settings));
     gl.setSize(host.clientWidth, host.clientHeight, false);
@@ -186,10 +215,20 @@ function createBreadScene({
     const onContextLost = (event: Event) => {
       event.preventDefault();
       console.warn("[KV Delight] WebGL context lost");
+      note("context", "webglcontextlost — the GPU reclaimed the context");
       onFail("the graphics context was lost");
     };
     gl.domElement.addEventListener("webglcontextlost", onContextLost, false);
     track(() => gl.domElement.removeEventListener("webglcontextlost", onContextLost));
+
+    // A shader program can also fail on the very first frame; report once.
+    let runtimeFailureReported = false;
+    const reportRuntime = (where: string, error: unknown) => {
+      if (runtimeFailureReported) return;
+      runtimeFailureReported = true;
+      reportError(`runtime:${where}`, error, `tier=${settings.tier}`);
+      onFail(error instanceof Error ? error.message : String(error));
+    };
 
     /* ------------------------------------------------------------- scene --- */
     const scene = new THREE.Scene();
@@ -197,9 +236,16 @@ function createBreadScene({
     // Only build an environment map when the GPU can do a half-float target,
     // and only on the high tier — it is the most expensive one-off cost here.
     const wantsEnv = settings.environmentMap && caps.floatRenderTarget;
+    if (!settings.environmentMap) {
+      note("environment", "skipped: tier disables it");
+    } else if (!caps.floatRenderTarget) {
+      note("environment", "skipped: no half-float render target");
+    }
+
     const env = wantsEnv
       ? buildEnvironment(gl)
       : { texture: null, disposed: () => {} };
+    note("environment", env.texture ? "built" : "not available (direct lights only)");
     if (env.texture) {
       scene.environment = env.texture;
       scene.environmentIntensity = 0.7;
@@ -267,11 +313,16 @@ function createBreadScene({
       ringSegments: settings.ringSegments,
       arcSteps: settings.arcSteps,
     });
+    note(
+      "geometry",
+      `${slices.length} slabs @ ${settings.ringSegments}×${settings.arcSteps}`,
+    );
     for (const slice of slices) track(() => slice.geometry.dispose());
 
     const maxTex = clampTextureSize(settings.crustTexture, caps.maxTextureSize);
 
     const crustTex = createCrustTexture(maxTex);
+    note("textures", `crust ${crustTex ? "ok" : "unavailable (no 2D context)"}`);
     if (crustTex) track(() => crustTex.dispose());
 
     const crustMat = settings.physicalMaterials
@@ -331,6 +382,7 @@ function createBreadScene({
     );
     if (bladeTex) track(() => bladeTex.dispose());
 
+
     const knife = createKnife(bladeTex);
     track(() => knife.dispose());
 
@@ -353,6 +405,12 @@ function createBreadScene({
       depthWrite: false,
     });
     track(() => shadowMat.dispose());
+
+    if (!settings.anisotropy) {
+      for (const tex of [crustTex, crumbTex, crumbBump, bladeTex, shadowTex]) {
+        if (tex) tex.anisotropy = 1;
+      }
+    }
 
     const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
     track(() => shadow.geometry.dispose());
@@ -503,24 +561,59 @@ function createBreadScene({
     };
     applyResize();
 
-    const ro = new ResizeObserver(resize);
-    ro.observe(host);
+    // `ResizeObserver` is iOS 13.4+. Without it, fall back to window resize —
+    // the scene still works, it just re-frames on orientation/viewport changes
+    // rather than on every element resize.
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver === "function") {
+      try {
+        ro = new ResizeObserver(() => {
+          try {
+            resize();
+          } catch (error) {
+            reportRuntime("resize-observer", error);
+          }
+        });
+        ro.observe(host);
+      } catch (error) {
+        reportError("capability:resize-observer", error);
+        ro = undefined;
+      }
+    } else {
+      note("capabilities", "no ResizeObserver — using window resize");
+      window.addEventListener("resize", resize);
+    }
+
     track(() => {
-      ro.disconnect();
+      ro?.disconnect();
+      window.removeEventListener("resize", resize);
       cancelAnimationFrame(resizeRaf);
     });
 
     /* -------------------------------------------------------------- loop -- */
     let raf = 0;
     let visible = true;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        visible = entry.isIntersecting;
-      },
-      { rootMargin: "10% 0px" },
-    );
-    io.observe(host);
-    track(() => io.disconnect());
+    // Same story: if the observer is missing the loop simply never pauses.
+    let io: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver === "function") {
+      try {
+        io = new IntersectionObserver(
+          ([entry]) => {
+            try {
+              visible = entry.isIntersecting;
+            } catch (error) {
+              reportRuntime("intersection-observer", error);
+            }
+          },
+          { rootMargin: "10% 0px" },
+        );
+        io.observe(host);
+      } catch (error) {
+        reportError("capability:intersection-observer", error);
+        io = undefined;
+      }
+    }
+    track(() => io?.disconnect());
 
     if (reducedMotion) {
       update(0.34); // a still, three-quarter hero angle
@@ -536,31 +629,43 @@ function createBreadScene({
     });
 
     const tick = () => {
+      if (disposed) return;
       raf = requestAnimationFrame(tick);
-      if (disposed || !visible || !activeRef.current) return;
+      if (!visible || !activeRef.current) return;
 
-      // Only touch the scene when the input actually moved: the loop still runs
-      // (so pointer parallax stays alive) but the layout maths is skipped.
-      const p = progressRef.current;
-      if (p !== lastP) {
-        update(p);
-        lastP = p;
+      // A throw inside a rAF callback is invisible to React error boundaries,
+      // so it has to be handled here: report it, fall back to the still, and
+      // stop the loop rather than throwing sixty times a second.
+      try {
+        // Only touch the scene when the input actually moved: the loop still
+        // runs (so pointer parallax stays alive) but the layout maths is skipped.
+        const p = progressRef.current;
+        if (p !== lastP) {
+          update(p);
+          lastP = p;
+        }
+
+        const cam = cameraFor(p, camera.aspect);
+        pointer.ox += (pointer.x - pointer.ox) * 0.07;
+        pointer.oy += (pointer.y - pointer.oy) * 0.07;
+        camera.position.x = pointer.ox * 0.34;
+        camera.position.y = cam.camY - pointer.oy * 0.2;
+        camera.lookAt(0, cam.lookY, 0);
+
+        gl.render(scene, camera);
+      } catch (error) {
+        disposed = true;
+        cancelAnimationFrame(raf);
+        reportRuntime("render-loop", error);
       }
-
-      const cam = cameraFor(p, camera.aspect);
-      pointer.ox += (pointer.x - pointer.ox) * 0.07;
-      pointer.oy += (pointer.y - pointer.oy) * 0.07;
-      camera.position.x = pointer.ox * 0.34;
-      camera.position.y = cam.camY - pointer.oy * 0.2;
-      camera.lookAt(0, cam.lookY, 0);
-
-      gl.render(scene, camera);
     };
 
     prewarm();
+    note("prewarm", "materials compiled");
     update(progressRef.current);
     lastP = progressRef.current;
     tick();
+    note("stage", "first frame scheduled");
     onReady();
 
     return teardown;
@@ -598,31 +703,55 @@ export default function LoafStage({
 
     const tier: QualityTier =
       quality === "auto" ? detectQualityTier() : quality;
-    const settings = settingsFor(tier);
+
+    // Progressive degradation: try the requested tier, then the last-resort
+    // config. Most mobile failures are one optional feature (environment map,
+    // physical materials, antialiasing) rather than "no WebGL at all", so
+    // dropping a rung usually still leaves a working film instead of a still.
+    const ladder: QualitySettings[] = [settingsFor(tier)];
+    if (ladder[0].tier !== SAFE.tier) ladder.push(SAFE);
 
     let teardown: (() => void) | undefined;
     let cancelled = false;
+    let lastError: unknown = null;
 
-    try {
-      teardown = createBreadScene({
-        host,
-        progressRef,
-        activeRef,
-        reducedMotion,
-        settings,
-        onReady: () => {
-          if (!cancelled) onReady?.();
-        },
-        onFail: (reason) => {
-          if (!cancelled) setFailed(reason);
-        },
-      });
-    } catch (error) {
-      // Any failure in setup — no context, PMREM, a canvas that refuses a
-      // texture — lands here and becomes a still image, not a crashed page.
-      console.error("[KV Delight] bread stage failed to start:", error);
+    for (const settings of ladder) {
+      if (cancelled) break;
+      try {
+        teardown = createBreadScene({
+          host,
+          progressRef,
+          activeRef,
+          reducedMotion,
+          settings,
+          onReady: () => {
+            if (!cancelled) onReady?.();
+          },
+          onFail: (reason) => {
+            if (!cancelled) setFailed(reason);
+          },
+        });
+        note("stage", `running at tier "${settings.tier}"`);
+        break;
+      } catch (error) {
+        lastError = error;
+        reportError(`stage-setup:${settings.tier}`, error, `tier=${settings.tier}`);
+        console.error(
+          `[KV Delight] bread stage failed at tier "${settings.tier}":`,
+          error,
+        );
+        // `createBreadScene` disposes anything it built before throwing, so the
+        // next rung starts from a clean canvas.
+      }
+    }
+
+    if (!teardown) {
+      // Every rung failed: show the supplied photograph, keep the page alive.
+      reportGl("stage", "all quality tiers failed; showing the still");
       setFailed(
-        error instanceof Error ? error.message : "the 3D scene could not start",
+        lastError instanceof Error
+          ? lastError.message
+          : "the 3D scene could not start",
       );
       return;
     }
@@ -633,6 +762,7 @@ export default function LoafStage({
         teardown?.();
       } catch (error) {
         console.warn("[KV Delight] bread stage teardown failed:", error);
+        reportError("stage-teardown", error);
       }
     };
   }, [progressRef, reducedMotion, quality, onReady]);

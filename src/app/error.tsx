@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import DiagnosticOverlay from "@/components/site/DiagnosticOverlay";
+import { reportError } from "@/lib/diagnostics";
 
 /**
  * Route-level error boundary.
@@ -19,10 +21,14 @@ export default function Error({
 }) {
   useEffect(() => {
     console.error("[KV Delight] route error:", error);
+    reportError("react:route-boundary", error, `digest=${error.digest ?? "none"}`);
   }, [error]);
 
   return (
     <main className="relative flex min-h-[100svh] items-center justify-center overflow-hidden px-5">
+      {/* The report that used to be missing: the real exception and its stack,
+          readable on the device that failed. */}
+      <DiagnosticOverlay force />
       <img
         src="/assets/product/bread-hero-scene.webp"
         alt=""
@@ -47,6 +53,10 @@ export default function Error({
         >
           Try again
         </button>
+        <p className="mt-5 text-[0.6rem] leading-relaxed text-cream/40">
+          Error: {error.message || "unknown"}
+          {error.digest ? ` · ${error.digest}` : ""}
+        </p>
       </div>
     </main>
   );
