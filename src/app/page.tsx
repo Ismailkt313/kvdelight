@@ -103,7 +103,7 @@ export default function Home() {
             </span>
           </div>
           <p className="text-[0.62rem] uppercase tracking-[0.24em] text-cream/35">
-            Foundation build · bread sequence only
+            Chapter one · bread, from whole loaf to sealed pack
           </p>
         </div>
       </footer>
