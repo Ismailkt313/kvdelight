@@ -5,6 +5,7 @@ import ProgressRail from "@/components/site/ProgressRail";
 import BreadChapter from "@/components/story/BreadChapter";
 import BunsChapter from "@/components/story/BunsChapter";
 import CreamChapter from "@/components/story/CreamChapter";
+import FounderSection from "@/components/site/FounderSection";
 
 export default function Home() {
   return (
@@ -25,6 +26,7 @@ export default function Home() {
         <BunsChapter />
 
         <CreamChapter />
+        <FounderSection />
       </main>
 
       <footer className="border-t border-cream/10 bg-ink-deep px-5 py-10 sm:px-10">

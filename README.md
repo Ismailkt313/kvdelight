@@ -38,6 +38,8 @@ Nothing is fetched from a third party at build time or at runtime.
 | `src/components/three/CreamStage.tsx` | The cream bun's three.js stage: elongated shell halves, the hinged lid, the piped rope and its draw range, steel nozzle and stream, the clip plane and section face, camera, on-demand render loop. |
 | `src/lib/creamBun.ts` | The cream bun's own geometry: superellipse plan swept by a dome profile, built halves with crumb faces, cream rope, seam layer, section face. |
 | `src/lib/creamChoreography.ts` | Cream timings, the hinge/fill/close/cut schedule, the nozzle's run along the long axis, camera framing solved against the real projection. |
+| `src/components/site/FounderSection.tsx` | The closing invitation: portrait, headline, founder name, and the single WhatsApp call to action. |
+| `src/lib/founder.ts` | Founder copy plus the WhatsApp number as configuration, and the `wa.me` URL builder. |
 | `src/lib/sections.ts` | The chapter list — one source of truth for the ids in the page and the labels in the header. |
 | `src/lib/slices.ts` | **Sliced loaf geometry**: ten closed slabs, each with a crust shell, crumb cut faces and a crust rim. |
 | `src/lib/knife.ts` | Serrated bread knife, built from geometry (extruded profile + handle + rivets). |
@@ -317,6 +319,67 @@ were structural rather than cosmetic:
    leaves rather than staying lit underneath the bread chapter's stage — so there
    are never two loaves in one viewport.
 
+## The founder invitation
+
+The page ends on a person, not a form. Immediately after the cream buns and
+before the footer there is one full-width block: Sameer's portrait, the question
+the copy asks, his name, the invitation, and a single button. No card, no panel,
+no contact form, no channel grid — the brief was to remove the enquiry form, so
+nothing here collects anything.
+
+- **Layout is one block, rotated.** On a phone it stacks portrait → headline →
+  name → invitation → full-width button, so the button lands within thumb reach
+  and the whole section is about one screen tall. From `lg` it is two columns,
+  portrait on the left and copy on the right, inside the same `max-w-[1500px]`
+  grid the rest of the page uses.
+- **The portrait is graded, not framed.** `sameer-kv.webp` (derived from the
+  supplied upload, colours untouched) is cropped with `object-cover` only — never
+  stretched — and the brand grade is applied with gradients over it: a warm
+  screen-blend lift from the key-light direction, a bottom fade into the ink and
+  soft side fades. That is what keeps it from reading as a photo in a box.
+- **The button is the only green on the page**, because `--color-brand-green` is
+  already a brand token and a WhatsApp call to action has to be recognised at a
+  glance. It carries the handset-in-a-speech-bubble glyph, a full 52 px tap
+  height, and a gold hairline ring so it still belongs to the palette.
+
+### The WhatsApp number is configuration, not a guess
+
+`src/lib/founder.ts` holds the whole contact surface. The number is **empty on
+purpose**: a wrong number sends a customer's message to a stranger, so it is not
+invented here.
+
+```ts
+export const FOUNDER: Founder = {
+  name: "Sameer KV",
+  whatsappNumber: "", // ← digits only, international format: "919876543210"
+  …
+};
+```
+
+Until it is set, the section renders the same button as a **disabled** control
+with the note *"WhatsApp number to be confirmed"*, derived from
+`WHATSAPP_CONFIGURED`, so it is obvious on screen rather than silently broken.
+Set the number and the same component renders a link with
+`target="_blank" rel="noopener noreferrer"` to:
+
+```
+https://wa.me/<digits>?text=<encodeURIComponent(message)>
+```
+
+The message is prefilled exactly as supplied — *"Hi Sameer, I came from the KV
+Delight website. May I know more about your products and details?"* — and
+`buildWhatsAppHref` is a pure function, so the URL can be checked without a
+browser:
+
+```ts
+// throwaway check, run with `npx tsx`: proves the URL decodes back to the copy
+decodeURIComponent(url.split("text=")[1]) === FOUNDER.message;
+```
+
+`encodeURIComponent` is what keeps the comma, the full stop and the question mark
+intact through WhatsApp's query string; the check decodes the URL back and
+compares it to the source string.
+
 ## Device safety and the mobile tier
 
 The stage is wrapped in layers so a graphics failure can never take the page
@@ -448,7 +511,15 @@ Remove the panel (and this section) once the device is confirmed healthy.
 10. The cream bun's nozzle is deliberately semi-metallic (0.55) and lit by a
     dedicated light: a fully metallic material without an environment map renders
     black. It reads as steel; it is not a physically exact steel.
-11. The cream bun's crust is **vertex colour, not a photographed texture** — a
+11. **Sameer's WhatsApp number still has to be supplied.** `FOUNDER.whatsappNumber`
+    is empty, so the call to action renders disabled with a visible note. The URL
+    builder, the encoding and the new-tab behaviour are all in place and checked;
+    only the number is missing, and it is one string in `src/lib/founder.ts`.
+12. The founder section is checked by build, SSR markup and the generated CSS —
+    not on a screen. There is no browser in this sandbox, so the portrait crop and
+    the grade are reasoned from the asset's dimensions (1200 × 1074 into a 5:4,
+    4:3 and 6:5 window with `object-cover`) rather than looked at.
+13. The cream bun's crust is **vertex colour, not a photographed texture** — a
     baked-crust map was tried and rejected, because the shell's UVs run the long
     way round and the map smeared into stripes. The mottling is procedural
     (three incommensurate sine bands, plus a sub-millimetre displacement of the

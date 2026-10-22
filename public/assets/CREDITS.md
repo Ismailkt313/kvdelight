@@ -13,6 +13,7 @@ Every file below is a supplied KV Delight asset — no stock, no generated subst
 | `product/bread-hero-scene.png` | image-1.png | Opening cinematic scene / WebGL fallback backdrop. |
 | `product/cream-bun-hero.png` | image-6.png | Cream bun beauty shot (stage 2). |
 | `product/cream-bun-cross-section.png` | image-7.png | Cream bun interior reveal (stage 2). image-8…12 were byte-identical duplicates and are not copied. |
+| `founder/sameer-kv.png` / `.webp` | supplied portrait | The founder section. Cropped on screen with `object-cover` only; no retouching, recolouring or compositing of the person. |
 | `style/` | — | Reserved for the five coffee-website screenshots (still missing). |
 
 Derived `*.webp` files are lossy conversions of the PNGs above, generated for delivery only.
