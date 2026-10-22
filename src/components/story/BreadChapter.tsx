@@ -7,6 +7,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import StageBoundary from "@/components/three/StageBoundary";
 import { note, reportError } from "@/lib/diagnostics";
+import { paint } from "@/lib/domPaint";
 import { BEATS, TIMELINE, bell, smoothstep } from "@/lib/choreography";
 
 const LoafStage = dynamic(() => import("@/components/three/LoafStage"), {
@@ -49,9 +50,9 @@ export default function BreadChapter() {
     const section = sectionRef.current;
     if (!section) return;
 
-    // These refs used to be non-null asserted. A null target makes
-    // `gsap.quickSetter` throw, and this effect is *outside* StageBoundary, so
-    // that throw reached the route error screen. Check them instead.
+    // These refs used to be non-null asserted. This effect is *outside*
+    // StageBoundary, so anything thrown here reaches the route error screen —
+    // a lesson from the iPhone crash. Check them instead.
     const packEl = packRef.current;
     const packCopyEl = packCopyRef.current;
     const packShadowEl = packShadowRef.current;
@@ -70,65 +71,50 @@ export default function BreadChapter() {
       return;
     }
 
-    let setters: {
-      y: ((v: number) => void)[];
-      opacity: ((v: number) => void)[];
-      packY: (v: number) => void;
-      packOpacity: (v: number) => void;
-      packScale: (v: number) => void;
-      copyOpacity: (v: number) => void;
-      copyY: (v: number) => void;
-      cueOpacity: (v: number) => void;
-      packShadow: (v: number) => void;
-      packShadowScale: (v: number) => void;
-    };
-    try {
-      setters = {
-        y: beatEls.map((el) => gsap.quickSetter(el, "y", "px") as (v: number) => void),
-        opacity: beatEls.map(
-          (el) => gsap.quickSetter(el, "opacity") as (v: number) => void,
-        ),
-        packY: gsap.quickSetter(packEl, "y", "px") as (v: number) => void,
-        packOpacity: gsap.quickSetter(packEl, "opacity") as (v: number) => void,
-        packScale: gsap.quickSetter(packEl, "scale") as (v: number) => void,
-        copyOpacity: gsap.quickSetter(packCopyEl, "opacity") as (v: number) => void,
-        copyY: gsap.quickSetter(packCopyEl, "y", "px") as (v: number) => void,
-        cueOpacity: gsap.quickSetter(cueEl, "opacity") as (v: number) => void,
-        packShadow: gsap.quickSetter(packShadowEl, "opacity") as (v: number) => void,
-        packShadowScale: gsap.quickSetter(packShadowEl, "scaleX") as (v: number) => void,
-      };
-    } catch (error) {
-      reportError("choreography:quicksetter", error);
-      setMotionFailed(true);
-      return;
-    }
-
+    /**
+     * All motion is written with plain `style` assignments (see `lib/domPaint`).
+     *
+     * This used to be `gsap.quickSetter`. GSAP resolves the `scale` alias to the
+     * string "scaleX,scaleY" and, on browsers that do not take its CSS path,
+     * applies it with `setAttribute` — which throws
+     * `InvalidCharacterError: Invalid qualified name: 'scaleX,scaleY'` on WebKit.
+     * That exception is what took the whole page down on iPhone. Direct writes
+     * cannot hit that path.
+     */
     const update = (p: number) => {
       // Captions — driven by the same windows the geometry uses.
-      BEATS.forEach((beat, i) => {
-        const [a, b] = beat.window;
+      for (let i = 0; i < BEATS.length; i++) {
+        const [a, b] = BEATS[i].window;
         const vis = bell(p, a, b);
-        setters.opacity[i](vis);
-        setters.y[i]((1 - vis) * 26);
-      });
+        paint(beatEls[i], { opacity: vis, translateY: (1 - vis) * 26 });
+      }
 
       // Packaging hand-off: the slices leave, the supplied pack arrives.
       const packIn = smoothstep(TIMELINE.packIn, TIMELINE.packInEnd, p);
-      setters.packOpacity(packIn);
-      setters.packY((1 - packIn) * 60);
-      setters.packScale(1.07 - packIn * 0.07);
-      setters.packShadow(packIn * 0.9);
-      setters.packShadowScale(0.7 + packIn * 0.3);
+      paint(packEl, {
+        opacity: packIn,
+        translateY: (1 - packIn) * 60,
+        scale: 1.07 - packIn * 0.07,
+      });
+
+      // The shadow is centred by the `-translate-x-1/2` class, so its own
+      // transform has to carry that offset too.
+      paint(packShadowEl, { opacity: packIn * 0.9, scaleX: 0.7 + packIn * 0.3, centreX: true });
 
       const copyIn = smoothstep(TIMELINE.packCopy, TIMELINE.packCopyEnd, p);
-      setters.copyOpacity(copyIn);
-      setters.copyY((1 - copyIn) * 22);
+      paint(packCopyEl, { opacity: copyIn, translateY: (1 - copyIn) * 22 });
 
       // Opening cue
-      setters.cueOpacity(1 - smoothstep(0, 0.045, p));
+      paint(cueEl, { opacity: 1 - smoothstep(0, 0.045, p) });
     };
 
-    update(0);
+    try {
+      update(0);
+    } catch (error) {
+      reportError("choreography:initial-paint", error);
+      setMotionFailed(true);
+      return;
+    }
 
     let st: ScrollTrigger | undefined;
     try {
