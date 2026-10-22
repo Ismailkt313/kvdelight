@@ -50,9 +50,9 @@ export const BEATS: Beat[] = [
   {
     index: "01",
     kicker: "Whole loaf",
-    title: "Every Bite\nBrings Delight",
+    title: "One loaf,\nwhole and warm",
     body:
-      "One loaf, out of the tin and into the light. Keep scrolling and it will come apart, slice by slice.",
+      "Out of the tin and into the light. Keep scrolling — one loaf comes apart, slice by slice, in front of you.",
     window: [-0.5, 0.145],
   },
   {
@@ -96,6 +96,13 @@ export const TIMELINE = {
   packCopy: 0.9,
   packCopyEnd: 0.975,
 } as const;
+
+/**
+ * How far neighbouring slabs interpenetrate while their seam is still uncut, in
+ * loaf units (the loaf is 4.5 long). Purely to kill the hairline gap between two
+ * flush closed meshes; it is not a visual gap and never reads as one.
+ */
+export const SEAM_OVERLAP = 0.006;
 
 export const SLICE_COUNT = 10;
 export const SEAM_COUNT = SLICE_COUNT - 1;
@@ -197,7 +204,14 @@ export function seamGaps(p: number, spreadScale = 1): number[] {
 
     const base = (0.028 * open[i] + 0.085 * widen[i]) * weight;
     const fan = 0.14 * spread * widen[i] * weight * spreadScale;
-    out[i] = (base + fan) * (1 - regroup);
+    // Every seam is an interface between two closed slabs, and two edges that
+    // merely touch still rasterise as a hairline of background. While a seam is
+    // uncut the slabs are therefore pushed *into* each other by a hair, so the
+    // loaf is one continuous crust until the blade gets there. The overlap is
+    // 0.006 loaf units — well under a pixel on a phone — and it collapses to
+    // zero the moment that seam opens (`open[i]` → 1).
+    const closed = -SEAM_OVERLAP * (1 - open[i]);
+    out[i] = (base + fan) * (1 - regroup) + closed;
   }
   return out;
 }
