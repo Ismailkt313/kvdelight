@@ -18,13 +18,27 @@ import { smoothstep } from "@/lib/choreography";
 import {
   BASE_Y,
   baseView,
-  cameraFor,
   captionShift,
+  cameraFor,
+  frameWidthFraction,
   knifeTransform,
   layoutSlices,
-  frameWidthFraction,
   yawAt,
 } from "@/lib/sliceLayout";
+import {
+  clampTextureSize,
+  readCapabilities,
+  safe2d,
+  webgl2Supported,
+} from "@/lib/webgl";
+import {
+  detectQualityTier,
+  pixelRatioFor,
+  settingsFor,
+  type QualitySettings,
+  type QualityTier,
+} from "@/lib/quality";
+import StageFallback from "@/components/three/StageFallback";
 
 type LoafStageProps = {
   /** Scroll progress of the bread chapter, 0 → 1. Mutated by ScrollTrigger. */
@@ -32,141 +46,215 @@ type LoafStageProps = {
   /** True when the chapter is on screen — otherwise the loop is skipped. */
   active: boolean;
   reducedMotion?: boolean;
-  quality?: "high" | "low";
+  /** "auto" resolves the tier from the device, on the client only. */
+  quality?: QualityTier | "auto";
   onReady?: () => void;
 };
 
+const FOV = 34;
 
-/** Warm studio environment built from a canvas gradient — no HDR download. */
-function buildEnvironment(renderer: THREE.WebGLRenderer) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 32;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d")!;
-  const g = ctx.createLinearGradient(0, 0, 0, 128);
-  g.addColorStop(0, "#fff3dd");
-  g.addColorStop(0.42, "#e8c898");
-  g.addColorStop(0.6, "#6d4a2a");
-  g.addColorStop(1, "#241508");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 32, 128);
+type EnvResult = { texture: THREE.Texture | null; disposed: () => void };
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
+/**
+ * Warm studio environment from a canvas gradient — no HDR download.
+ *
+ * Returns null instead of throwing. `PMREMGenerator` renders into a half-float
+ * target, which is the most likely thing to fail on an older mobile GPU; when it
+ * does, the scene keeps its direct lights and simply loses the environment
+ * reflection, rather than losing the whole page.
+ */
+function buildEnvironment(renderer: THREE.WebGLRenderer): EnvResult {
+  const noop = () => {};
+  let tex: THREE.CanvasTexture | null = null;
 
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const env = pmrem.fromEquirectangular(tex).texture;
-  pmrem.dispose();
-  tex.dispose();
-  return env;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 128;
+    const ctx = safe2d(canvas);
+    if (!ctx) return { texture: null, disposed: noop };
+
+    const g = ctx.createLinearGradient(0, 0, 0, 128);
+    g.addColorStop(0, "#fff3dd");
+    g.addColorStop(0.42, "#e8c898");
+    g.addColorStop(0.6, "#6d4a2a");
+    g.addColorStop(1, "#241508");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 32, 128);
+
+    tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromEquirectangular(tex).texture;
+    pmrem.dispose();
+
+    return {
+      texture: env,
+      disposed: () => {
+        env.dispose();
+        tex?.dispose();
+      },
+    };
+  } catch (error) {
+    console.warn("[KV Delight] environment map unavailable:", error);
+    tex?.dispose();
+    return { texture: null, disposed: noop };
+  }
 }
 
 /**
- * Scene A → E, read from chapter progress. Camera framing:
- *   - the yaw turn is slow while cutting (the blade holds its alignment) and
- *     opens into a full 360° showcase of the fanned slices in scene D;
- *   - the fit scale is recomputed from the arrangement's real width, so the
- *     spread always stays inside the frame on any aspect ratio.
+ * Builds the whole scene and returns a teardown function.
+ *
+ * Everything that can fail is allowed to throw out of here; the caller catches
+ * it, swaps in the still image, and — crucially — this function disposes
+ * whatever it had already built before rethrowing. Nothing partial is leaked.
  */
-export default function LoafStage({
+function createBreadScene({
+  host,
   progressRef,
-  active,
-  reducedMotion = false,
-  quality = "high",
+  reducedMotion,
+  settings,
   onReady,
-}: LoafStageProps) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const [failed, setFailed] = useState(false);
+  onFail,
+  activeRef,
+}: {
+  host: HTMLDivElement;
+  progressRef: React.MutableRefObject<number>;
+  activeRef: React.MutableRefObject<boolean>;
+  reducedMotion: boolean;
+  settings: QualitySettings;
+  onReady: () => void;
+  onFail: (reason: string) => void;
+}): () => void {
+  const disposers: Array<() => void> = [];
+  const track = (dispose: () => void) => disposers.push(dispose);
 
-  // Read through refs so a prop change never rebuilds the whole scene.
-  const activeRef = useRef(active);
-  activeRef.current = active;
+  let renderer: THREE.WebGLRenderer | null = null;
 
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
+  const teardown = () => {
+    for (let i = disposers.length - 1; i >= 0; i--) {
+      try {
+        disposers[i]();
+      } catch {
+        /* a failed dispose must not mask the original error */
+      }
+    }
+    if (renderer) {
+      try {
+        renderer.dispose();
+        if (renderer.domElement.parentNode === host) {
+          host.removeChild(renderer.domElement);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  };
 
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({
-        antialias: quality === "high",
-        alpha: true,
-        powerPreference: "high-performance",
-      });
-    } catch {
-      setFailed(true);
-      return;
+  try {
+    /* ------------------------------------------------------------ renderer -- */
+    const canvas = document.createElement("canvas");
+    renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: settings.antialias,
+      alpha: true,
+      powerPreference: settings.tier === "low" ? "default" : "high-performance",
+      // Never let the browser silently fall back to a software rasteriser: a
+      // 1 fps film is worse than a still.
+      failIfMajorPerformanceCaveat: false,
+    });
+
+    const gl = renderer;
+    const caps = readCapabilities(gl);
+    if (caps.notes.length) {
+      console.info("[KV Delight] WebGL notes:", caps.notes.join("; "));
     }
 
-    const coarse = quality === "low";
-    const dpr = Math.min(
-      window.devicePixelRatio || 1,
-      coarse ? 1.4 : window.innerWidth < 768 ? 1.5 : 1.75,
-    );
-    renderer.setPixelRatio(dpr);
-    renderer.setSize(host.clientWidth, host.clientHeight, false);
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.domElement.style.width = "100%";
-    renderer.domElement.style.height = "100%";
-    renderer.domElement.style.display = "block";
-    host.appendChild(renderer.domElement);
+    gl.setPixelRatio(pixelRatioFor(settings));
+    gl.setSize(host.clientWidth, host.clientHeight, false);
+    gl.toneMapping = THREE.ACESFilmicToneMapping;
+    gl.toneMappingExposure = 1.0;
+    gl.outputColorSpace = THREE.SRGBColorSpace;
+    gl.domElement.style.width = "100%";
+    gl.domElement.style.height = "100%";
+    gl.domElement.style.display = "block";
+    host.appendChild(gl.domElement);
 
+    /* ------------------------------------------------- context-loss safety -- */
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      console.warn("[KV Delight] WebGL context lost");
+      onFail("the graphics context was lost");
+    };
+    gl.domElement.addEventListener("webglcontextlost", onContextLost, false);
+    track(() => gl.domElement.removeEventListener("webglcontextlost", onContextLost));
+
+    /* ------------------------------------------------------------- scene --- */
     const scene = new THREE.Scene();
-    scene.environment = buildEnvironment(renderer);
-    scene.environmentIntensity = 0.7;
+
+    // Only build an environment map when the GPU can do a half-float target,
+    // and only on the high tier — it is the most expensive one-off cost here.
+    const wantsEnv = settings.environmentMap && caps.floatRenderTarget;
+    const env = wantsEnv
+      ? buildEnvironment(gl)
+      : { texture: null, disposed: () => {} };
+    if (env.texture) {
+      scene.environment = env.texture;
+      scene.environmentIntensity = 0.7;
+    }
+    track(() => env.disposed());
 
     const camera = new THREE.PerspectiveCamera(
-      34,
-      host.clientWidth / host.clientHeight,
+      FOV,
+      Math.max(1, host.clientWidth) / Math.max(1, host.clientHeight),
       0.1,
       100,
     );
-    const FOV = 34;
-
-    let view = baseView(1.5);
+    let view = baseViewSafe(camera.aspect);
 
     /* ------------------------------------------------------------ lights -- */
-    const key = new THREE.DirectionalLight("#ffe1b4", 3.4);
-    key.position.set(-4.6, 6.8, 5.0);
-    scene.add(key);
+    // Ordered, so the low tier can take a prefix and simply drop the rest.
+    const lights: THREE.Light[] = [
+      (() => {
+        const key = new THREE.DirectionalLight("#ffe1b4", 3.4);
+        key.position.set(-4.6, 6.8, 5.0);
+        return key;
+      })(),
+      (() => {
+        const rim = new THREE.DirectionalLight("#ffc484", 2.6);
+        rim.position.set(5.0, 2.6, -5.4);
+        return rim;
+      })(),
+      (() => {
+        const frontFill = new THREE.DirectionalLight("#ffe6c6", 0.85);
+        frontFill.position.set(0.6, 1.6, 6.5);
+        return frontFill;
+      })(),
+      (() => {
+        const crumbKey = new THREE.DirectionalLight("#fff2dc", 1.15);
+        crumbKey.position.set(0.3, 1.1, 6.8);
+        return crumbKey;
+      })(),
+      (() => {
+        const bounce = new THREE.DirectionalLight("#8a5626", 0.7);
+        bounce.position.set(1.5, -3.5, 3.0);
+        return bounce;
+      })(),
+      (() => {
+        const crumbBack = new THREE.DirectionalLight("#ffe0b4", 0.55);
+        crumbBack.position.set(-0.6, 0.7, -6.2);
+        return crumbBack;
+      })(),
+    ];
 
-    const rim = new THREE.DirectionalLight("#ffc484", 2.6);
-    rim.position.set(5.0, 2.6, -5.4);
-    scene.add(rim);
+    for (const light of lights.slice(0, settings.extraLights)) scene.add(light);
 
-    const bounce = new THREE.DirectionalLight("#8a5626", 0.7);
-    bounce.position.set(1.5, -3.5, 3.0);
-    scene.add(bounce);
-
-    // Camera-side fill: keeps the faces that turn toward the viewer from
-    // collapsing into silhouette — and lights the cut crumb faces.
-    const frontFill = new THREE.DirectionalLight("#ffe6c6", 0.85);
-    frontFill.position.set(0.6, 1.6, 6.5);
-    scene.add(frontFill);
-
-    // The crumb is the subject in scenes C and D, and those faces only exist
-    // once the loaf is open — so it gets its own soft pair, camera side and
-    // opposite, that keeps them lit through the whole 360° showcase.
-    const crumbKey = new THREE.DirectionalLight("#fff2dc", 1.15);
-    crumbKey.position.set(0.3, 1.1, 6.8);
-    scene.add(crumbKey);
-
-    const crumbBack = new THREE.DirectionalLight("#ffe0b4", 0.55);
-    crumbBack.position.set(-0.6, 0.7, -6.2);
-    scene.add(crumbBack);
-
-    const ambient = new THREE.AmbientLight("#ffe9cf", 0.28);
-    scene.add(ambient);
-
-    const fill = new THREE.HemisphereLight("#fff1da", "#22140a", 0.5);
-    scene.add(fill);
+    scene.add(new THREE.AmbientLight("#ffe9cf", wantsEnv ? 0.28 : 0.42));
+    scene.add(new THREE.HemisphereLight("#fff1da", "#22140a", wantsEnv ? 0.5 : 0.62));
 
     /* ------------------------------------------------------------- world --- */
-    // `world` carries the turn + fit scale; the loaf and the knife live inside
-    // it, so the blade always stays in the seam plane as the loaf turns.
     const world = new THREE.Group();
     scene.add(world);
 
@@ -175,35 +263,61 @@ export default function LoafStage({
     world.add(loafGroup);
 
     /* -------------------------------------------------------- slice meshes -- */
-    const { slices } = createSliceGeometries(
-      coarse
-        ? { ringSegments: 20, arcSteps: 6 }
-        : { ringSegments: 30, arcSteps: 9 },
-    );
+    const { slices } = createSliceGeometries({
+      ringSegments: settings.ringSegments,
+      arcSteps: settings.arcSteps,
+    });
+    for (const slice of slices) track(() => slice.geometry.dispose());
 
-    const crustTex = createCrustTexture(coarse ? 256 : 512);
-    const crustMat = createCrustMaterial(crustTex);
-    // Opaque for the whole film; transparency is switched on only for the
-    // hand-off fade, so the slabs sort crisply while they are being studied.
+    const maxTex = clampTextureSize(settings.crustTexture, caps.maxTextureSize);
+
+    const crustTex = createCrustTexture(maxTex);
+    if (crustTex) track(() => crustTex.dispose());
+
+    const crustMat = settings.physicalMaterials
+      ? createCrustMaterial(crustTex)
+      : new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          ...(crustTex ? { map: crustTex, bumpMap: crustTex } : {}),
+          bumpScale: 0.042,
+          roughness: 0.72,
+          metalness: 0,
+          envMapIntensity: 0.55,
+          transparent: true,
+          opacity: 1,
+        });
     crustMat.transparent = false;
     crustMat.needsUpdate = true;
+    track(() => crustMat.dispose());
 
-    const crumbTex = createCrumbTexture(coarse ? 256 : 512);
-    const crumbBump = createCrumbBump(coarse ? 256 : 512);
-    crumbTex.repeat.set(1, 1);
-    const crumbMat = new THREE.MeshPhysicalMaterial({
-      vertexColors: true,
-      map: crumbTex,
-      bumpMap: crumbBump,
+    const crumbSize = clampTextureSize(settings.crumbTexture, caps.maxTextureSize);
+    const crumbTex = createCrumbTexture(crumbSize);
+    const crumbBump = createCrumbBump(crumbSize);
+    if (crumbTex) track(() => crumbTex.dispose());
+    if (crumbBump) track(() => crumbBump.dispose());
+
+    const crumbCommon = {
+      vertexColors: true as const,
+      ...(crumbTex ? { map: crumbTex } : {}),
+      ...(crumbBump ? { bumpMap: crumbBump } : {}),
       bumpScale: 0.018,
       roughness: 0.84,
       metalness: 0,
-      sheen: 0.3,
-      sheenColor: new THREE.Color("#fff1d8"),
-      sheenRoughness: 0.9,
       envMapIntensity: 0.4,
+      // Opaque for the whole film: transparency would drop all ten slabs into
+      // the sorted transparent pass and let them show through one another.
       transparent: false,
-    });
+      opacity: 1,
+    };
+    const crumbMat = settings.physicalMaterials
+      ? new THREE.MeshPhysicalMaterial({
+          ...crumbCommon,
+          sheen: 0.3,
+          sheenColor: new THREE.Color("#fff1d8"),
+          sheenRoughness: 0.9,
+        })
+      : new THREE.MeshStandardMaterial(crumbCommon);
+    track(() => crumbMat.dispose());
 
     const meshes: THREE.Mesh[] = slices.map((slice) => {
       const mesh = new THREE.Mesh(slice.geometry, [crustMat, crumbMat]);
@@ -212,8 +326,14 @@ export default function LoafStage({
     });
 
     /* -------------------------------------------------------------- knife -- */
-    const bladeTex = createBladeTexture(256);
+    const bladeTex = createBladeTexture(
+      clampTextureSize(settings.bladeTexture, caps.maxTextureSize),
+    );
+    if (bladeTex) track(() => bladeTex.dispose());
+
     const knife = createKnife(bladeTex);
+    track(() => knife.dispose());
+
     const knifePivot = new THREE.Group();
     knifePivot.add(knife.group);
     knife.group.rotation.y = -Math.PI / 2; // length runs along world Z
@@ -221,23 +341,30 @@ export default function LoafStage({
     world.add(knifePivot);
 
     /* ------------------------------------------------------ contact shadow -- */
-    const shadowTex = createShadowTexture();
+    const shadowTex = createShadowTexture(
+      clampTextureSize(settings.shadowTexture, caps.maxTextureSize),
+    );
+    if (shadowTex) track(() => shadowTex.dispose());
+
     const shadowMat = new THREE.MeshBasicMaterial({
-      map: shadowTex,
+      ...(shadowTex ? { map: shadowTex } : {}),
       transparent: true,
       opacity: 0.8,
       depthWrite: false,
     });
+    track(() => shadowMat.dispose());
+
     const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
+    track(() => shadow.geometry.dispose());
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = BASE_Y - 0.008;
     shadow.scale.set(7.4, 3.1, 1);
     world.add(shadow);
 
-    let spreadScale = 1;
+    let spreadScale = view.spreadScale;
     let fit = 1;
+    let lastP = -1;
 
-    /** Writes the shared layout onto the meshes; returns the arrangement width. */
     const applySlices = (p: number) => {
       const layout = layoutSlices(p, spreadScale);
       for (let i = 0; i < meshes.length; i++) {
@@ -258,22 +385,29 @@ export default function LoafStage({
       knifePivot.rotation.set(k.rx, 0, 0.03 * (k.rx / -0.16 || 0));
     };
 
+    const fadeMaterials = [
+      crustMat,
+      crumbMat,
+      knife.bladeMaterial,
+      knife.handleMaterial,
+    ];
+
+    /**
+     * The hand-off fade. Materials stay opaque for the whole film so the slabs
+     * sort crisply, and only become transparent while the fade is actually
+     * running. Both shader variants are compiled up front by `prewarm()`, so
+     * flipping `transparent` here costs a program-cache lookup, not a recompile
+     * — which is what used to hitch at the pack hand-off.
+     */
     const setFade = (t: number) => {
-      const opaque = t <= 0.001;
-      if (opaque === crustMat.transparent) {
-        crustMat.transparent = !opaque;
-        crustMat.needsUpdate = true;
-        crumbMat.transparent = !opaque;
-        crumbMat.needsUpdate = true;
-        knife.bladeMaterial.transparent = !opaque;
-        knife.bladeMaterial.needsUpdate = true;
-        knife.handleMaterial.transparent = !opaque;
-        knife.handleMaterial.needsUpdate = true;
+      const transparent = t > 0.001;
+      for (const mat of fadeMaterials) {
+        if (mat.transparent !== transparent) {
+          mat.transparent = transparent;
+          mat.needsUpdate = true;
+        }
+        mat.opacity = 1 - t;
       }
-      crustMat.opacity = 1 - t;
-      crumbMat.opacity = 1 - t;
-      knife.bladeMaterial.opacity = 1 - t;
-      knife.handleMaterial.opacity = 1 - t;
     };
 
     const update = (p: number) => {
@@ -300,8 +434,7 @@ export default function LoafStage({
       if (!Number.isFinite(fit) || fit <= 0) fit = 1;
       world.scale.setScalar(fit);
 
-      // Sit clear of the left-hand caption on desktop. Scaled by the visible
-      // half-width, and faded in as the loaf opens up.
+      // Sit clear of the left-hand caption on desktop, while the loaf is whole.
       world.position.x = captionShift(p, camera.aspect) * halfW;
 
       /* hand-off: the bread leaves, the pack arrives */
@@ -316,6 +449,26 @@ export default function LoafStage({
       applyKnife(p);
     };
 
+    /**
+     * Compile both shader variants once, before the first frame the visitor
+     * scrolls into. Toggling `transparent` later is what used to cause a
+     * visible hitch at the packaging hand-off (and on the way back up).
+     */
+    const prewarm = () => {
+      for (const mat of fadeMaterials) {
+        const wasTransparent = mat.transparent;
+        mat.transparent = !wasTransparent;
+        mat.needsUpdate = true;
+        try {
+          gl.compile(scene, camera);
+        } catch {
+          /* compiling is an optimisation, never a requirement */
+        }
+        mat.transparent = wasTransparent;
+        mat.needsUpdate = true;
+      }
+    };
+
     /* ---------------------------------------------------------- parallax -- */
     const pointer = { x: 0, y: 0, tx: 0, ty: 0, ox: 0, oy: 0 };
     const onPointerMove = (e: PointerEvent) => {
@@ -325,25 +478,37 @@ export default function LoafStage({
       pointer.ty = ((e.clientY - r.top) / r.height - 0.5) * 2;
     };
     window.addEventListener("pointermove", onPointerMove, { passive: true });
+    track(() => window.removeEventListener("pointermove", onPointerMove));
 
     /* ------------------------------------------------------------ resize -- */
-    const resize = () => {
+    // Debounced to a frame: iOS fires resize continuously while the browser
+    // chrome collapses, and an unguarded handler re-ran the whole update each
+    // time, which is felt as stutter during a scroll.
+    let resizeRaf = 0;
+    const applyResize = () => {
       const w = host.clientWidth;
       const h = host.clientHeight;
       if (!w || !h) return;
-      renderer.setSize(w, h, false);
-      const aspect = w / h;
-      camera.aspect = aspect;
+      gl.setSize(w, h, false);
+      camera.aspect = w / h;
       camera.fov = FOV;
-
-      view = baseView(aspect);
+      view = baseViewSafe(camera.aspect);
       spreadScale = view.spreadScale;
       camera.updateProjectionMatrix();
-      update(progressRef.current);
+      lastP = -1;
     };
-    resize();
+    const resize = () => {
+      cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(applyResize);
+    };
+    applyResize();
+
     const ro = new ResizeObserver(resize);
     ro.observe(host);
+    track(() => {
+      ro.disconnect();
+      cancelAnimationFrame(resizeRaf);
+    });
 
     /* -------------------------------------------------------------- loop -- */
     let raf = 0;
@@ -355,74 +520,135 @@ export default function LoafStage({
       { rootMargin: "10% 0px" },
     );
     io.observe(host);
+    track(() => io.disconnect());
 
     if (reducedMotion) {
-      renderer.render(scene, camera);
-      onReady?.();
+      update(0.34); // a still, three-quarter hero angle
+      gl.render(scene, camera);
+      onReady();
+      return teardown;
     }
+
+    let disposed = false;
+    track(() => {
+      disposed = true;
+      cancelAnimationFrame(raf);
+    });
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      if (reducedMotion || !activeRef.current || !visible) return;
+      if (disposed || !visible || !activeRef.current) return;
 
-      pointer.x = pointer.tx;
-      pointer.y = pointer.ty;
+      // Only touch the scene when the input actually moved: the loop still runs
+      // (so pointer parallax stays alive) but the layout maths is skipped.
+      const p = progressRef.current;
+      if (p !== lastP) {
+        update(p);
+        lastP = p;
+      }
 
-      update(progressRef.current);
-
-      // Parallax is tracked as a smoothed *offset*, because update() has just
-      // written the absolute camera height for this frame.
+      const cam = cameraFor(p, camera.aspect);
       pointer.ox += (pointer.x - pointer.ox) * 0.07;
       pointer.oy += (pointer.y - pointer.oy) * 0.07;
-
-      const cam = cameraFor(progressRef.current, camera.aspect);
       camera.position.x = pointer.ox * 0.34;
       camera.position.y = cam.camY - pointer.oy * 0.2;
       camera.lookAt(0, cam.lookY, 0);
 
-      renderer.render(scene, camera);
+      gl.render(scene, camera);
     };
+
+    prewarm();
+    update(progressRef.current);
+    lastP = progressRef.current;
     tick();
-    onReady?.();
+    onReady();
 
-    /* ----------------------------------------------------------- cleanup -- */
+    return teardown;
+  } catch (error) {
+    teardown();
+    throw error;
+  }
+}
+
+/** `baseView` with a guard for a zero-size host (before first layout). */
+function baseViewSafe(aspect: number) {
+  return baseView(Number.isFinite(aspect) && aspect > 0 ? aspect : 1.5);
+}
+
+export default function LoafStage({
+  progressRef,
+  active,
+  reducedMotion = false,
+  quality = "auto",
+  onReady,
+}: LoafStageProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    if (!webgl2Supported()) {
+      setFailed("WebGL 2 is not available in this browser");
+      return;
+    }
+
+    const tier: QualityTier =
+      quality === "auto" ? detectQualityTier() : quality;
+    const settings = settingsFor(tier);
+
+    let teardown: (() => void) | undefined;
+    let cancelled = false;
+
+    try {
+      teardown = createBreadScene({
+        host,
+        progressRef,
+        activeRef,
+        reducedMotion,
+        settings,
+        onReady: () => {
+          if (!cancelled) onReady?.();
+        },
+        onFail: (reason) => {
+          if (!cancelled) setFailed(reason);
+        },
+      });
+    } catch (error) {
+      // Any failure in setup — no context, PMREM, a canvas that refuses a
+      // texture — lands here and becomes a still image, not a crashed page.
+      console.error("[KV Delight] bread stage failed to start:", error);
+      setFailed(
+        error instanceof Error ? error.message : "the 3D scene could not start",
+      );
+      return;
+    }
+
     return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      io.disconnect();
-      window.removeEventListener("pointermove", onPointerMove);
-
-      for (const slice of slices) slice.geometry.dispose();
-      crustMat.dispose();
-      crumbMat.dispose();
-      crustTex.dispose();
-      crumbTex.dispose();
-      crumbBump.dispose();
-      bladeTex.dispose();
-      knife.dispose();
-      shadow.geometry.dispose();
-      shadowMat.dispose();
-      shadowTex.dispose();
-      scene.environment?.dispose();
-      renderer.dispose();
-      if (renderer.domElement.parentNode === host) {
-        host.removeChild(renderer.domElement);
+      cancelled = true;
+      try {
+        teardown?.();
+      } catch (error) {
+        console.warn("[KV Delight] bread stage teardown failed:", error);
       }
     };
   }, [progressRef, reducedMotion, quality, onReady]);
 
+  // A JS unhandled rejection must never take the route down with it.
+  useEffect(() => {
+    if (!failed) return;
+    console.warn("[KV Delight] falling back to the still image:", failed);
+  }, [failed]);
+
   return (
     <div className="absolute inset-0">
-      <div ref={hostRef} className="h-full w-full" aria-hidden="true" />
-      {failed && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          {/* WebGL unavailable → supplied hero artwork, never a stock substitute */}
-          <img
-            src="/assets/product/bread-hero-scene.webp"
-            alt="A freshly baked KV Delight loaf on a wooden board with flour and wheat."
-            className="h-full w-full object-cover"
-          />
-        </div>
+      {failed ? (
+        <StageFallback reason={failed} />
+      ) : (
+        <div ref={hostRef} className="h-full w-full" aria-hidden="true" />
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { fbm } from "@/lib/loaf";
+import { safe2d } from "@/lib/webgl";
 
 /**
  * Canvas-generated crumb textures — no external images, same approach the crust
@@ -10,16 +11,59 @@ const CREAM = "#f4e7cd";
 const PORE = "#cfb489";
 const FLECK = "#8d6c3f";
 
+/**
+ * A sized canvas and its 2D context, or `null` when the browser refuses one.
+ * iOS Safari hands back `null` under memory pressure; the old `!` here is what
+ * turned that into a TypeError during scene setup.
+ */
 function canvas(size: number) {
   const c = document.createElement("canvas");
   c.width = c.height = size;
-  const ctx = c.getContext("2d")!;
+  const ctx = safe2d(c);
+  if (!ctx) return null;
   return { c, ctx };
 }
 
+/**
+ * Generated canvases are cached per (kind, size). The per-pixel loops below are
+ * the most expensive thing in the whole build — tens of millions of `Math.sin`
+ * calls — and they only need to happen once per session.
+ */
+const cache = new Map<string, HTMLCanvasElement>();
+
+function cached(
+  key: string,
+  size: number,
+  draw: (c: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => void,
+  { srgb = true }: { srgb?: boolean } = {},
+): THREE.CanvasTexture | null {
+  const wrap = (canvasEl: HTMLCanvasElement) => {
+    const tex = new THREE.CanvasTexture(canvasEl);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    // Colour maps are sRGB; height/bump maps must stay linear or the pores read
+    // as bright speckles instead of recesses.
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  };
+
+  const hit = cache.get(`${key}:${size}`);
+  if (hit) return wrap(hit);
+
+  const made = canvas(size);
+  if (!made) return null;
+
+  draw(made.c, made.ctx);
+  cache.set(`${key}:${size}`, made.c);
+  return wrap(made.c);
+}
+
 /** Pale, open bread crumb: mottling, airy pores, a little bran. */
-export function createCrumbTexture(size = 512): THREE.CanvasTexture {
-  const { c, ctx } = canvas(size);
+export function createCrumbTexture(size = 512): THREE.CanvasTexture | null {
+  return cached("crumb", size, (_c, ctx) => drawCrumb(ctx, size));
+}
+
+function drawCrumb(ctx: CanvasRenderingContext2D, size: number) {
   ctx.fillStyle = CREAM;
   ctx.fillRect(0, 0, size, size);
 
@@ -88,17 +132,16 @@ export function createCrumbTexture(size = 512): THREE.CanvasTexture {
   }
 
   ctx.globalAlpha = 1;
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
 }
 
 /** Matching height map: pores recessed, crumb domed between them. */
-export function createCrumbBump(size = 512): THREE.CanvasTexture {
-  const { c, ctx } = canvas(size);
+export function createCrumbBump(size = 512): THREE.CanvasTexture | null {
+  return cached("crumb-bump", size, (_c, ctx) => drawCrumbBump(ctx, size), {
+    srgb: false,
+  });
+}
+
+function drawCrumbBump(ctx: CanvasRenderingContext2D, size: number) {
   ctx.fillStyle = "#b9b9b9";
   ctx.fillRect(0, 0, size, size);
 
@@ -120,14 +163,14 @@ export function createCrumbBump(size = 512): THREE.CanvasTexture {
   }
 
   ctx.globalAlpha = 1;
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  return tex;
 }
 
 /** Fine metallic grain for the blade, so it is not a perfect mirror. */
-export function createBladeTexture(size = 256): THREE.CanvasTexture {
-  const { c, ctx } = canvas(size);
+export function createBladeTexture(size = 256): THREE.CanvasTexture | null {
+  return cached("blade", size, (_c, ctx) => drawBlade(ctx, size));
+}
+
+function drawBlade(ctx: CanvasRenderingContext2D, size: number) {
   const g = ctx.createLinearGradient(0, 0, 0, size);
   g.addColorStop(0, "#e8ebef");
   g.addColorStop(0.45, "#c3c9d1");
@@ -143,9 +186,4 @@ export function createBladeTexture(size = 256): THREE.CanvasTexture {
     ctx.fillRect(0, y, size, 1);
   }
   ctx.globalAlpha = 1;
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
 }

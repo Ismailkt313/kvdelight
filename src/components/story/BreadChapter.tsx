@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useReducedMotion } from "@/lib/useReducedMotion";
+import StageBoundary from "@/components/three/StageBoundary";
 import { BEATS, TIMELINE, bell, smoothstep } from "@/lib/choreography";
 
 const LoafStage = dynamic(() => import("@/components/three/LoafStage"), {
@@ -196,14 +197,20 @@ export default function BreadChapter() {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_70%_at_50%_38%,#2a1a0d_0%,#160d06_55%,#0c0703_100%)]" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-ink to-transparent" />
 
-        {/* the slice film: whole loaf → knife → slices → spread → pack */}
+        {/* the slice film: whole loaf → knife → slices → spread → pack.
+            The boundary keeps a failed scene from taking the captions, the pack
+            hand-off, the header or the footer with it — it swaps in the still
+            and leaves the rest of the chapter running. */}
         <div className="absolute inset-0">
-          <LoafStage
-            progressRef={progressRef}
-            active
-            reducedMotion={false}
-            onReady={onReady}
-          />
+          <StageBoundary>
+            <LoafStage
+              progressRef={progressRef}
+              active
+              reducedMotion={false}
+              quality="auto"
+              onReady={onReady}
+            />
+          </StageBoundary>
         </div>
 
         {/* floor shadow beneath the pack */}
