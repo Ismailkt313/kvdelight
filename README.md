@@ -94,8 +94,29 @@ ink to 4.7:1 on cream, nothing is recoloured, redrawn or cropped, and there is n
 white tile, shadow or glow. `kv-delight-mark.{png,webp}` is the derived
 transparent art (original file untouched).
 
+### The phone composition
+
+The phone is a different composition, not the desktop grid shrunk. Copy is
+compact at the top — crest, wordmark, one gold rule, the chapter line, the
+headline, the tagline, one line of support — and the product takes **every pixel
+that is left**. That row is `flex-1`, so the scene absorbs the viewport instead of
+leaving a fixed gap, and the loaf is centred inside it, which splits any leftover
+space above and below the bread rather than collecting it in one band.
+
+The photograph is **124% of the content width** on a phone. The loaf inside the
+supplied crop ends at about 88% of its width, so the extra 24% bleeds off both
+edges of the screen while the whole loaf stays visible: there is no image edge
+anywhere in the viewport, which is what removes the "photo pasted on a
+background" read. What is left of the edges is taken by `.loaf-plate`'s vertical
+mask — a stepped gradient, because a straight linear one left a visible grey
+smudge over the milk jug — and the board at the bottom of the photograph meets
+`table-band`, which is the same board lit the same way. From `sm` the box returns
+to the photograph's own ratio with `object-contain`, so a short viewport
+letterboxes the loaf instead of distorting it.
+
 Copy order on a phone is deliberate: branding → headline → support → bread. The
-loaf never sits under a line of type, at any width.
+loaf never sits under a line of type, at any width, and the scroll cue sits in its
+own row below the product with the bottom scrim behind it — never over the bread.
 
 ## The bread chapter (`h-[460svh]`, one pinned stage)
 
