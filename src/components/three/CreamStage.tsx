@@ -6,22 +6,27 @@ import {
   CREAM,
   CREAM_FOV,
   TIMELINE,
+  clipXAt,
+  creamLayerAt,
+  cutAt,
   fillAt,
   nozzleAt,
-  creamSurfaceAt,
   openAt,
-  seamCreamAt,
+  ROPE_Y,
   viewFor,
 } from "@/lib/creamChoreography";
-import { createBunGeometries, createBunMaterials } from "@/lib/bun";
-import { createShadowTexture, getCrustTexture } from "@/lib/loaf";
-import { createCrumbBump, createCrumbTexture } from "@/lib/breadTextures";
-import { smoothstep } from "@/lib/choreography";
 import {
-  clampTextureSize,
-  readCapabilities,
-  webgl2Supported,
-} from "@/lib/webgl";
+  ROPE,
+  SHELL,
+  createCreamLayer,
+  createCreamRope,
+  createSectionFace,
+  createShellGeometries,
+} from "@/lib/creamBun";
+import { createCrumbBump } from "@/lib/breadTextures";
+import { createShadowTexture } from "@/lib/loaf";
+import { smoothstep } from "@/lib/choreography";
+import { readCapabilities, webgl2Supported } from "@/lib/webgl";
 import {
   SAFE,
   detectQualityTier,
@@ -43,105 +48,22 @@ type CreamStageProps = {
 };
 
 /**
- * Cream, as geometry.
+ * The cream bun, on screen.
  *
- * A soft dome sitting on the cut face, with three thin ridges riding up its
- * slope: the dome is what cream looks like in volume, the ridges are what a
- * piping bag leaves on the surface. An earlier version was flat rings alone,
- * which read as ripples on a puddle rather than as cream.
+ * The product is a *long* roll: 2.3 : 1 in plan, split lengthwise, cream along
+ * the seam. The geometry lives in `lib/creamBun` — this file only poses it.
  *
- * Everything is local to the group and grows from its origin, so the fill can
- * rise by scaling in Y and the mound stays welded to the crumb face.
- */
-function createCreamMound(segments: number) {
-  const group = new THREE.Group();
-  const material = new THREE.MeshStandardMaterial({
-    color: "#fffaf0",
-    roughness: 0.78,
-    metalness: 0,
-    transparent: true,
-    opacity: 1,
-  });
-
-  const R = 0.66;
-  const YMAX = 0.28;
-
-  const bodyGeometry = new THREE.SphereGeometry(
-    R,
-    segments,
-    Math.max(6, Math.round(segments / 3)),
-    0,
-    Math.PI * 2,
-    0,
-    Math.PI / 2,
-  );
-  const body = new THREE.Mesh(bodyGeometry, material);
-  body.scale.set(1, 0.001, 1);
-  group.add(body);
-
-  // Where up the dome each ridge sits, as a fraction of its height, and the
-  // radius of the dome at that height — so a ridge always lies on the surface.
-  const facs = [0.45, 0.72, 0.9];
-  const ridges = facs.map((fac, i) => {
-    const radius = R * Math.sqrt(Math.max(0, 1 - fac * fac)) + 0.012;
-    const geometry = new THREE.TorusGeometry(
-      radius,
-      0.038,
-      Math.max(6, Math.round(segments / 6)),
-      segments,
-    );
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.rotation.x = Math.PI / 2;
-    mesh.rotation.z = i * 0.7;
-    mesh.scale.setScalar(0.001);
-    group.add(mesh);
-    return mesh;
-  });
-
-  return { group, body, ridges, material, facs, bodyGeometry, YMAX, R };
-}
-
-/** Steel piping nozzle: body, tapered tip, collar. Origin is the tip. */
-function createNozzle() {
-  const group = new THREE.Group();
-  const steel = new THREE.MeshStandardMaterial({
-    color: "#c9ccd2",
-    // Without an environment map a fully metallic material renders black, so
-    // this is deliberately half-metal: under the key light it reads as brushed
-    // steel, and it costs one material instead of a render target.
-    metalness: 0.45,
-    roughness: 0.34,
-    // Transparent from the start so the nozzle can fade in and out without a
-    // shader recompile mid-scroll.
-    transparent: true,
-    opacity: 1,
-  });
-
-  // Compact on purpose: only the nozzle is in shot — the bag is above the
-  // frame — and a full-length bag would intersect the lifted top half.
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.16, 18), steel);
-  body.position.y = 0.28;
-  group.add(body);
-
-  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.155, 0.2, 18, 1, true), steel);
-  tip.position.y = 0.1;
-  group.add(tip);
-
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.024, 8, 18), steel);
-  collar.rotation.x = Math.PI / 2;
-  collar.position.y = 0.2;
-  group.add(collar);
-
-  group.visible = false;
-  return { group, steel, parts: [body, tip, collar] };
-}
-
-/**
- * Builds the scene and returns a teardown.
+ * Five moves, all scroll-driven, all reversible:
  *
- * Same failure contract as the bread and bun stages: anything can throw out of
- * here, the caller catches it, and every object built so far is disposed before
- * the error leaves. A locked-down browser loses the film, never the page.
+ *   1  the whole bun, three-quarter
+ *   2  the lid hinges back along the long axis
+ *   3  the nozzle runs the length, laying a rope of cream behind it
+ *   4  the lid closes on the cream, the finished bun turns
+ *   5  the near end is clipped away: the section, cream through the bread
+ *
+ * The halves are pre-separated meshes and the section is a clip plane plus a
+ * built cap — there is no boolean cutting at run time, and the cream is tube
+ * geometry revealed by a draw range, not a fluid simulation.
  */
 function createCreamScene({
   host,
@@ -216,8 +138,9 @@ function createCreamScene({
     gl.setPixelRatio(pixelRatioFor(settings));
     gl.setSize(host.clientWidth, host.clientHeight, false);
     gl.toneMapping = THREE.ACESFilmicToneMapping;
-    gl.toneMappingExposure = 1.05;
+    gl.toneMappingExposure = 1.06;
     gl.outputColorSpace = THREE.SRGBColorSpace;
+    gl.localClippingEnabled = true;
     gl.domElement.style.width = "100%";
     gl.domElement.style.height = "100%";
     gl.domElement.style.display = "block";
@@ -240,7 +163,7 @@ function createCreamScene({
       onFail(error instanceof Error ? error.message : String(error));
     };
 
-    /* ------------------------------------------------------------- scene --- */
+    /* --------------------------------------------------------------- scene -- */
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(
       CREAM_FOV,
@@ -249,138 +172,193 @@ function createCreamScene({
       60,
     );
 
-    // The same warm rig as the soft buns, so a cream bun and a soft bun are
-    // visibly from one bakery. One extra light catches the steel nozzle.
-    const key = new THREE.DirectionalLight("#ffe3b8", 3.4);
-    key.position.set(-3.2, 5.2, 4.2);
-    const rim = new THREE.DirectionalLight("#ffb877", 2.4);
+    // The same warm rig as the other chapters, plus a low bounce that lifts the
+    // crumb inside the opened bun — without it the interior reads as grey.
+    const key = new THREE.DirectionalLight("#ffe3b8", 3.3);
+    key.position.set(-3.4, 5.2, 4.2);
+    const rim = new THREE.DirectionalLight("#ffb877", 2.2);
     rim.position.set(4.2, 2.4, -4.6);
-    const fill = new THREE.DirectionalLight("#ffe8cc", 0.9);
+    const fill = new THREE.DirectionalLight("#ffe8cc", 0.95);
     fill.position.set(0.4, 1.6, 5.4);
-    const bounce = new THREE.DirectionalLight("#b87a3e", 1.1);
+    const bounce = new THREE.DirectionalLight("#c98a52", 1.15);
     bounce.position.set(0.3, -2.6, 2.8);
-    const crumbLight = new THREE.DirectionalLight("#fff4e2", 0.8);
-    crumbLight.position.set(-0.6, 1.2, -3.4);
-    const steelLight = new THREE.DirectionalLight("#eaf2ff", 1.1);
+    const crumbLight = new THREE.DirectionalLight("#fff4e2", 1.0);
+    crumbLight.position.set(-0.8, 2.2, -2.4);
+    const steelLight = new THREE.DirectionalLight("#eaf2ff", 1.2);
     steelLight.position.set(1.8, 4.6, 2.2);
 
-    // Ordered by priority, because the tier trims from the end: the steel light
-    // outranks the crumb light here — the nozzle is the one object that needs a
-    // highlight, and the crumb is already lit by the bounce.
-    const rig = [key, rim, fill, bounce, steelLight, crumbLight];
+    const rig = [key, rim, fill, bounce, crumbLight, steelLight];
     for (const light of rig.slice(0, Math.max(3, settings.extraLights))) scene.add(light);
 
-    const ambient = new THREE.AmbientLight("#ffe9cf", 0.36);
+    const ambient = new THREE.AmbientLight("#ffe9cf", 0.42);
     scene.add(ambient);
-    const hemi = new THREE.HemisphereLight("#fff1da", "#241609", 0.55);
+    const hemi = new THREE.HemisphereLight("#fff1da", "#2a1a0c", 0.62);
     scene.add(hemi);
 
-    /* ------------------------------------------------------------- world --- */
     const world = new THREE.Group();
     scene.add(world);
-
     const bunGroup = new THREE.Group();
     world.add(bunGroup);
 
     /* ------------------------------------------------------------ geometry -- */
-    const geometries = createBunGeometries({
-      latitudes: settings.bunLatitudes,
-      segments: settings.bunSegments,
-    });
-    track(() => geometries.top.dispose());
+    const latitudes = Math.max(8, Math.round(settings.bunLatitudes * 0.6));
+    const segments = settings.bunSegments;
+    const geometries = createShellGeometries({ latitudes, segments });
     track(() => geometries.bottom.dispose());
+    track(() => geometries.top.dispose());
 
-    const maxTex = caps.maxTextureSize;
-    const crustTex = getCrustTexture(clampTextureSize(settings.crustTexture, maxTex));
-    const crumbTex = createCrumbTexture(clampTextureSize(settings.crumbTexture, maxTex));
-    const crumbBump = createCrumbBump(clampTextureSize(settings.crumbTexture, maxTex));
-    if (crumbTex) track(() => crumbTex.dispose());
-    if (crumbBump) track(() => crumbBump.dispose());
-
-    const materials = createBunMaterials({
-      physical: settings.physicalMaterials,
-      crustTexture: crustTex,
-      crumbTexture: crumbTex,
-      crumbBump,
+    const rope = createCreamRope({
+      stations: Math.max(28, Math.round(settings.bunSegments * 1.8)),
+      segments: Math.max(8, Math.round(settings.bunSegments / 3.4)),
+      radius: ROPE.radius,
     });
-    track(() => materials.crust.dispose());
-    track(() => materials.crumb.dispose());
-    if (!settings.anisotropy) {
-      for (const tex of [crustTex, crumbTex, crumbBump]) {
-        if (tex) tex.anisotropy = 1;
-      }
+    track(() => rope.dispose());
+
+    const layerGeom = createCreamLayer({ segments });
+    track(() => layerGeom.dispose());
+
+    const sectionGeom = createSectionFace({ x: 0 });
+    track(() => sectionGeom.dispose());
+
+    /* ----------------------------------------------------------- materials -- */
+    /**
+     * The knife plane. It is parked far outside the bun until the section beat,
+     * so the same materials are used for the whole film and no shader ever has
+     * to be rebuilt mid-scroll (a recompile is a dropped frame on a phone).
+     */
+    const knife = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 1000);
+    const clip = [knife];
+
+    const crustMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.62,
+      metalness: 0.02,
+      transparent: true,
+      clippingPlanes: clip,
+      side: THREE.FrontSide,
+    });
+    const crumbBump = createCrumbBump(
+      Math.min(settings.crumbTexture, caps.maxTextureSize),
+    );
+    if (crumbBump) track(() => crumbBump!.dispose());
+
+    const crumbMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      ...(crumbBump ? { bumpMap: crumbBump, bumpScale: 0.35 } : {}),
+      roughness: 0.96,
+      metalness: 0,
+      transparent: true,
+      clippingPlanes: clip,
+      side: THREE.DoubleSide,
+    });
+    const creamMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.4,
+      metalness: 0.02,
+      transparent: true,
+      clippingPlanes: clip,
+    });
+    const sectionMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.9,
+      metalness: 0,
+      transparent: true,
+      side: THREE.DoubleSide,
+    });
+    const steelMat = new THREE.MeshStandardMaterial({
+      color: "#c9ced6",
+      metalness: 0.55,
+      roughness: 0.3,
+    });
+    const streamMat = new THREE.MeshStandardMaterial({
+      color: "#fffdf7",
+      roughness: 0.45,
+      transparent: true,
+      opacity: 0.96,
+    });
+
+    for (const mat of [crustMat, crumbMat, creamMat, sectionMat, steelMat, streamMat]) {
+      track(() => mat.dispose());
     }
-    const materialsFor = [materials.crust, materials.crumb];
 
     /* -------------------------------------------------------------- halves -- */
-    const bottom = new THREE.Mesh(geometries.bottom, materialsFor);
+    const bottom = new THREE.Mesh(geometries.bottom, [crustMat, crumbMat]);
     bunGroup.add(bottom);
 
-    const topPivot = new THREE.Group();
-    topPivot.position.set(0, CREAM.cutY, 0);
-    bunGroup.add(topPivot);
-    const top = new THREE.Mesh(geometries.top, materialsFor);
-    top.position.set(0, -CREAM.cutY, 0);
-    topPivot.add(top);
+    const lidPivot = new THREE.Group();
+    const pivotY = SHELL.cutY + SHELL.cream;
+    const pivotZ = -SHELL.halfWidth * 0.92;
+    lidPivot.position.set(0, pivotY, pivotZ);
+    bunGroup.add(lidPivot);
 
-    /* --------------------------------------------------------------- cream -- */
-    const cream = createCreamMound(settings.bunSegments);
-    track(() => cream.material.dispose());
-    track(() => cream.bodyGeometry.dispose());
-    for (const ridge of cream.ridges) track(() => ridge.geometry.dispose());
-    cream.group.position.y = CREAM.cutY;
-    bunGroup.add(cream.group);
+    const lid = new THREE.Mesh(geometries.top, [crustMat, crumbMat]);
+    // Put the lid's geometry back where it belongs, so the pivot alone decides
+    // where it hinges.
+    lid.position.set(0, -pivotY, -pivotZ);
+    lidPivot.add(lid);
 
-    // The seam bulge: cream squeezed out where the two halves meet. One torus,
-    // hidden until the bun starts closing.
-    const seamMat = new THREE.MeshStandardMaterial({
-      color: "#fffaf0",
-      roughness: 0.8,
-      metalness: 0,
-      transparent: true,
-      opacity: 1,
-    });
-    track(() => seamMat.dispose());
-    const seamGeo = new THREE.TorusGeometry(0.94, 0.09, 8, settings.bunSegments);
-    track(() => seamGeo.dispose());
-    const seam = new THREE.Mesh(seamGeo, seamMat);
-    seam.rotation.x = Math.PI / 2;
-    seam.position.y = CREAM.cutY;
-    seam.scale.setScalar(0.001);
-    bunGroup.add(seam);
+    const creamLayer = new THREE.Mesh(layerGeom, creamMat);
+    bunGroup.add(creamLayer);
+
+    const ropeMesh = new THREE.Mesh(rope, creamMat);
+    bunGroup.add(ropeMesh);
+
+    const section = new THREE.Mesh(sectionGeom, sectionMat);
+    section.position.x = CREAM.cutX;
+    section.visible = false;
+    bunGroup.add(section);
 
     /* -------------------------------------------------------------- nozzle -- */
-    const nozzle = createNozzle();
-    track(() => nozzle.steel.dispose());
-    for (const part of nozzle.parts) track(() => part.geometry.dispose());
-    world.add(nozzle.group);
-
-    /* The piped cream between the tip and the surface. Without it the nozzle
-     * hovers over the bun and pipes into thin air; with it, the fill has a
-     * source. It is scaled per frame to whatever gap is left. */
-    const streamMat = new THREE.MeshStandardMaterial({
-      color: "#fffaf0",
-      roughness: 0.7,
-      metalness: 0,
-      transparent: true,
-      opacity: 1,
-    });
-    track(() => streamMat.dispose());
-    const streamGeo = new THREE.CylinderGeometry(0.05, 0.058, 1, 10, 1, true);
-    track(() => streamGeo.dispose());
-    const stream = new THREE.Mesh(streamGeo, streamMat);
-    stream.visible = false;
-    world.add(stream);
-
-    /* ------------------------------------------------------ contact shadow -- */
-    const shadowTex = createShadowTexture(
-      clampTextureSize(settings.shadowTexture, maxTex),
+    const nozzle = new THREE.Group();
+    // Sized to read on a phone: a real tip is ~15 % of the roll's width, and
+    // at this framing anything smaller disappears into the crumb.
+    const collar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.17, 0.2, 20),
+      steelMat,
     );
-    if (shadowTex) track(() => shadowTex.dispose());
+    collar.position.y = 0.32;
+    const cone = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.062, 0.17, 0.3, 20, 1, true),
+      steelMat,
+    );
+    cone.position.y = 0.1;
+    // A rim at the tip: without it the cone's open end reads as a hole.
+    const lip = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.064, 0.062, 0.035, 20, 1, false),
+      steelMat,
+    );
+    lip.position.y = -0.04;
+    nozzle.add(collar, cone, lip);
+    for (const mesh of [collar, cone, lip]) track(() => mesh.geometry.dispose());
+
+    // The bead of cream at the tip: it rounds off the rope's cut leading edge,
+    // so the strip looks extruded rather than clipped.
+    const bead = new THREE.Mesh(
+      new THREE.SphereGeometry(ROPE.radius * 1.04, 16, 12),
+      creamMat,
+    );
+    track(() => bead.geometry.dispose());
+    bead.visible = false;
+    bunGroup.add(bead);
+    nozzle.visible = false;
+    bunGroup.add(nozzle);
+
+    const stream = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.042, 0.05, 1, 12, 1, true),
+      streamMat,
+    );
+    stream.visible = false;
+    bunGroup.add(stream);
+    track(() => stream.geometry.dispose());
+
+    /* ------------------------------------------------------------- shadow -- */
+    const shadowTex = createShadowTexture(
+      Math.min(settings.shadowTexture, caps.maxTextureSize),
+    );
     const shadowMat = new THREE.MeshBasicMaterial({
       ...(shadowTex ? { map: shadowTex } : {}),
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.66,
       depthWrite: false,
     });
     track(() => shadowMat.dispose());
@@ -390,7 +368,7 @@ function createCreamScene({
     shadow.position.y = 0.002;
     world.add(shadow);
 
-    /* ------------------------------------------------------------ sizing --- */
+    /* ------------------------------------------------------------- sizing -- */
     let lastP = -1;
 
     const applyResize = () => {
@@ -434,98 +412,102 @@ function createCreamScene({
       cancelAnimationFrame(resizeRaf);
     });
 
-    /* -------------------------------------------------------------- poses -- */
+    /* --------------------------------------------------------------- poses -- */
+    const stationCount = (rope as unknown as { stations: number }).stations;
+    const perStation = (rope as unknown as { perStation: number }).perStation;
+
     const update = (p: number) => {
       const view = viewFor(p, camera.aspect);
       const open = openAt(p);
       const filled = fillAt(p);
-      const seamIn = seamCreamAt(p);
       const pipe = nozzleAt(p);
+      const seam = creamLayerAt(p);
+      const cut = cutAt(p);
 
       bunGroup.rotation.y = view.yaw;
 
-      // A hairline of overlap while closed: two flush discs still rasterise a
-      // seam, and a bun with a visible equator before it has been opened is the
-      // "pre-sliced" tell the loaf had to lose too.
-      const closed = 0.006 * (1 - open.open);
-      topPivot.position.y = CREAM.cutY + open.lift - closed;
-      topPivot.rotation.x = open.tilt;
+      /* 1 + 2 · the lid: hinged about the long axis at the far edge */
+      lidPivot.rotation.x = open.hinge;
+      // While closed the two cut faces would sit exactly in one plane; sinking
+      // the lid by a few thousandths keeps them from fighting for the pixel.
+      lidPivot.position.y = pivotY - 0.004 * (1 - open.open);
 
-      /* the fill: a mound that rises, with its piped ridges riding the slope */
-      const rising = smoothstep(0, 0.05, filled);
-      cream.body.visible = filled > 0.004;
-      // A hemisphere is `R` tall before it is squashed: scaling it by `filled`
-      // alone would put its apex through the bun's crown, which is exactly what
-      // the software render caught.
-      cream.body.scale.set(
-        1,
-        Math.max(0.001, filled * rising * (cream.YMAX / cream.R)),
-        1,
-      );
-      cream.ridges.forEach((ridge, i) => {
-        const fac = cream.facs[i];
-        const show = smoothstep(fac * 0.55, Math.max(fac * 0.6, fac * 0.95), filled);
-        ridge.visible = show > 0.02;
-        ridge.scale.setScalar(Math.max(0.001, show));
-        ridge.position.y = Math.max(0.004, filled * cream.YMAX * fac);
-      });
+      /* 3 · the rope, revealed station by station as the nozzle advances */
+      const laid = Math.max(0, Math.min(1, filled));
+      ropeMesh.visible = laid > 0.002;
+      rope.setDrawRange(0, Math.ceil(laid * stationCount) * perStation);
 
-      /* the cream at the seam, once the halves are coming together */
-      seam.visible = seamIn > 0.002;
-      if (seam.visible) seam.scale.setScalar(0.9 + 0.1 * seamIn);
+      /* the cream layer at the seam, from the moment the lid starts down */
+      creamLayer.visible = seam > 0.004;
+      creamMat.opacity = 1;
 
       /* nozzle, and the cream leaving it */
-      nozzle.group.visible = pipe.visible > 0.01;
-      nozzle.group.position.set(0, pipe.y, 0);
-      nozzle.group.rotation.y = pipe.spin;
-      nozzle.steel.opacity = pipe.visible;
+      nozzle.visible = pipe.visible > 0.01;
+      if (nozzle.visible) {
+        nozzle.position.set(pipe.x, pipe.y, 0);
+      }
+      bead.visible = pipe.visible > 0.2 && laid > 0.002 && laid < 0.999;
+      if (bead.visible) {
+        bead.position.set(pipe.x, ROPE_Y - ROPE.radius * ROPE.flatten * 0.5, 0);
+        bead.scale.setScalar(0.85 + 0.15 * pipe.visible);
+      }
 
-      const surface = creamSurfaceAt(p);
+      const surface = ROPE_Y;
       const gap = pipe.y - surface;
-      stream.visible = pipe.visible > 0.02 && gap > 0.03;
+      stream.visible = nozzle.visible && gap > 0.02;
       if (stream.visible) {
         stream.scale.set(1, gap, 1);
-        stream.position.set(0, surface + gap / 2, 0);
-        streamMat.opacity = pipe.visible;
+        stream.position.set(pipe.x, surface + gap / 2, 0);
       }
+
+      /* 5 · the knife: clip the near end and show the built section */
+      const clipOn = cut > 0.002;
+      // The plane lives in world space, so it has to turn with the bun: the
+      // cut is perpendicular to the long axis, not to the world X. The constant
+      // is bun-space X because the normal is a unit vector along the axis.
+      knife.normal.set(-Math.cos(view.yaw), 0, Math.sin(view.yaw));
+      knife.constant = clipOn ? clipXAt(p) : 1000;
+      section.visible = clipOn;
+      sectionMat.opacity = smoothstep(0.35, 0.8, cut);
 
       /* camera */
       camera.position.set(0, view.camY, view.camZ);
       camera.lookAt(0, view.lookY, 0);
 
-      /* light: arrives lit, warms a little through the reveal */
-      const light = 0.66 + 0.34 * smoothstep(0, TIMELINE.revealEnd, p);
-      key.intensity = 3.4 * light;
-      rim.intensity = (2.4 + 0.8 * (1 - light)) * light;
-      fill.intensity = 0.9 * light;
-      bounce.intensity = 1.1 * light;
-      crumbLight.intensity = 0.8 * light;
-      steelLight.intensity = 1.1 * light;
-      ambient.intensity = 0.36 * light;
-      hemi.intensity = 0.55 * light;
+      /* light: arrives lit and warms a little through the reveal */
+      const light = 0.68 + 0.32 * smoothstep(0, TIMELINE.revealEnd, p);
+      key.intensity = 3.3 * light;
+      rim.intensity = (2.2 + 0.7 * (1 - light)) * light;
+      fill.intensity = 0.95 * light;
+      bounce.intensity = 1.15 * light;
+      crumbLight.intensity = 1.0 * light;
+      steelLight.intensity = 1.2 * light;
+      ambient.intensity = 0.42 * light;
+      hemi.intensity = 0.62 * light;
 
-      const arrive = smoothstep(0, 0.12, p);
-      world.position.y = -0.1 * (1 - arrive);
-      world.scale.setScalar(0.95 + 0.05 * arrive);
+      const arrive = smoothstep(0, 0.1, p);
+      world.position.y = -0.08 * (1 - arrive);
+      world.scale.setScalar(0.94 + 0.06 * arrive);
 
-      /* contact shadow follows the bun */
-      shadow.scale.set(3.0, 2.4, 1);
-      shadowMat.opacity = 0.6 * (0.3 + 0.7 * arrive);
+      /* contact shadow: long and narrow, to match the roll */
+      shadow.scale.set(2.9, 1.5, 1);
+      shadowMat.opacity = 0.58 * (0.35 + 0.65 * arrive);
 
       /* packaging hand-off: the bun leaves as the four-pack arrives */
       const pass = smoothstep(TIMELINE.packIn, TIMELINE.packInEnd, p);
-      bunGroup.position.y = pass * 0.14;
-      // The opening frame is a bun, not a ghost of one: the reveal only *adds*
-      // light, so the shell starts at three-quarters opacity rather than the
-      // near-nothing the soft buns chapter used to start from.
-      for (const mat of materialsFor) mat.opacity = (1 - pass) * (0.78 + 0.22 * arrive);
-      cream.material.opacity = 1 - pass;
-      streamMat.opacity *= 1 - pass;
-      seamMat.opacity = 1 - pass;
-      shadowMat.opacity *= 1 - pass;
+      bunGroup.position.y = pass * 0.12;
+      const fade = 1 - pass;
+      // The first frame is a bun, not a ghost of one: the reveal only adds
+      // light, so the shell starts at three-quarters opacity.
+      crustMat.opacity = fade * (0.74 + 0.26 * arrive);
+      crumbMat.opacity = fade * (0.74 + 0.26 * arrive);
+      creamMat.opacity = fade;
+      sectionMat.opacity *= fade;
+      streamMat.opacity = 0.96 * fade;
+      shadowMat.opacity *= fade;
     };
 
-    /* -------------------------------------------------------------- loop -- */
+    /* ---------------------------------------------------------------- loop -- */
     let visible = true;
     let io: IntersectionObserver | undefined;
     if (typeof IntersectionObserver === "function") {
@@ -554,7 +536,7 @@ function createCreamScene({
 
     if (reducedMotion) {
       // The frame that says the most: open, half piped, nozzle in shot.
-      update(0.47);
+      update(0.42);
       gl.render(scene, camera);
       onReady();
       return teardown;
@@ -574,8 +556,8 @@ function createCreamScene({
 
       try {
         const p = progressRef.current;
-        // No pointer parallax here: this stage has four moving parts already,
-        // and a still frame must be able to go idle so a phone can sleep.
+        // No pointer parallax here: this stage has enough moving parts, and a
+        // still frame must be able to go idle so a phone can sleep.
         if (p !== lastP) {
           update(p);
           lastP = p;
@@ -680,7 +662,7 @@ export default function CreamStage({
         <StageFallback
           reason={failed}
           src="/assets/brand/packaging-cream-bun-4pack.webp"
-          alt="KV Delight cream buns, four to a pack, cream visible at the cut."
+          alt="KV Delight cream buns, four to a pack, cream visible at the seam."
           width={1024}
           height={1536}
           subject="the same cream buns in their four-pack"

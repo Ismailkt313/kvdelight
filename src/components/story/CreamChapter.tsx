@@ -309,7 +309,7 @@ export default function CreamChapter() {
       id="cream-buns"
       ref={sectionRef}
       aria-labelledby="cream-heading"
-      className="relative h-[360svh] sm:h-[380svh]"
+      className="relative h-[400svh] sm:h-[430svh]"
     >
       <div className="sticky top-0 h-[100svh] w-full overflow-hidden">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(88%_68%_at_50%_40%,#2c1a0d_0%,#170e07_56%,#0c0703_100%)]" />
@@ -375,15 +375,16 @@ export default function CreamChapter() {
 
         {/* chapter title, always readable for assistive tech */}
         <h2 id="cream-heading" className="sr-only">
-          KV Delight cream buns — one bun opened, filled with cream, closed and
+          KV Delight cream buns — one long bun opened, piped with cream, closed and
           sealed four to a pack
         </h2>
         <p className="sr-only">
-          The sequence runs in five scenes: a single closed cream bun in warm
-          light; the top half lifting back along its seam; a piping nozzle
-          descending to fill the bun with cream; the halves closing over the
-          cream with a little showing at the seam; and the sealed four-pack
-          arriving as the bun leaves the frame.
+          The sequence runs in five scenes: one long cream bun in warm light;
+          its lid hinging back along the long axis to show the crumb inside; a
+          piping nozzle travelling the length of the bun, laying a continuous
+          rope of cream; the lid closing over it, then a section cut across the
+          bun to show the cream through the bread; and finally the sealed
+          four-pack arriving as the bun leaves the frame.
         </p>
 
         {/* captions, bottom-left, in the same strip as the other two chapters */}
