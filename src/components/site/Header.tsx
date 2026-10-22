@@ -1,82 +1,154 @@
-import Link from "next/link";
-import BrandMark from "@/components/site/BrandMark";
+"use client";
 
-const chapters = [
-  { id: "bread", label: "Bread", state: "live" as const },
-  { id: "buns", label: "Soft Buns", state: "live" as const },
-  { id: "cream-buns", label: "Cream Buns", state: "soon" as const },
-];
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import BrandMark from "@/components/site/BrandMark";
+import { SECTIONS, type SectionId } from "@/lib/sections";
 
 /**
- * Fixed masthead.
+ * The sticky chapter bar.
  *
- * The crest is the supplied mark printed on a cream oval (`BrandMark`) — the
- * same treatment the brand's own hero photograph uses, and the reason it stays
- * legible here: brand red on ink is 3.7:1, on cream it is 4.7:1. No tile, no
- * glow, no recolour of the artwork itself.
+ * Three rules decided its shape:
  *
- * At small sizes the badge reads as a seal rather than as spelled-out type, so
- * the cream wordmark beside it carries the name.
+ * 1. **No chrome.** It is a transparent plate: no card, no bar, no border. All
+ *    that sits behind the type is a short ink gradient that fades to nothing, so
+ *    the header reads as part of the film rather than a strip laid over it.
+ * 2. **No hamburger.** All three chapters are links, on every screen size. Three
+ *    short labels fit a 375 px row — measured, not assumed — so hiding them
+ *    behind a button was costing a tap for nothing.
+ * 3. **Never two logos.** The hero owns the mark at the top of the page; this
+ *    bar fades in only once that lockup has left the screen, and fades back out
+ *    if you scroll home again.
  *
- * On phones the nav is hidden rather than squeezed: three tracked-out labels
- * plus a lockup overflow 375 px, and the chapters are already named in full in
- * the "Next in the film" section below.
+ * The revealed state is driven by an `IntersectionObserver` on `#hero-brand`
+ * rather than a scroll offset, which would have to guess a `100svh` that moves
+ * as the browser chrome collapses.
  */
 export default function Header() {
+  const [revealed, setRevealed] = useState(false);
+  const [active, setActive] = useState<SectionId | null>(null);
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const brand = document.getElementById("hero-brand");
+    if (!brand || typeof IntersectionObserver !== "function") {
+      setRevealed(true);
+      return;
+    }
+
+    let io: IntersectionObserver | undefined;
+    try {
+      io = new IntersectionObserver(
+        (entries) => setRevealed(!entries[entries.length - 1].isIntersecting),
+        { threshold: 0 },
+      );
+      io.observe(brand);
+    } catch {
+      setRevealed(true);
+    }
+    return () => io?.disconnect();
+  }, []);
+
+  /**
+   * Which chapter is on screen.
+   *
+   * The root is inset to a band across the middle of the viewport, so the answer
+   * is "the section crossing the reading line", not "the first section in the
+   * document that is technically intersecting". Every chapter is several screens
+   * tall, so exactly one of them fills that band at any moment.
+   */
+  useEffect(() => {
+    if (typeof IntersectionObserver !== "function") return;
+    const els = SECTIONS.map((s) => document.getElementById(s.id)).filter(
+      (el): el is HTMLElement => el !== null,
+    );
+    if (!els.length) return;
+
+    const ratios = new Map<string, number>();
+    let io: IntersectionObserver | undefined;
+    try {
+      io = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) ratios.set(entry.target.id, entry.intersectionRatio);
+          let best: SectionId | null = null;
+          let bestRatio = 0.02;
+          for (const { id } of SECTIONS) {
+            const ratio = ratios.get(id) ?? 0;
+            if (ratio > bestRatio) {
+              best = id;
+              bestRatio = ratio;
+            }
+          }
+          setActive(best);
+        },
+        { rootMargin: "-34% 0px -34% 0px", threshold: [0, 0.2, 0.5, 0.8, 1] },
+      );
+      els.forEach((el) => io?.observe(el));
+    } catch {
+      io = undefined;
+    }
+    return () => io?.disconnect();
+  }, []);
+
   return (
-    <header className="pointer-events-none fixed inset-x-0 top-0 z-50">
-      {/* Scrim only — keeps cream type readable over the hero photograph. */}
+    <header
+      ref={headerRef}
+      inert={!revealed}
+      className={`site-header fixed inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top)] transition-[transform,opacity] duration-500 ease-[var(--ease-cine)] motion-reduce:transition-none ${
+        revealed ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"
+      }`}
+    >
+      {/* Not a bar — a fade. Ink at the very top, gone by 112 px. */}
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-ink/85 via-ink/35 to-transparent sm:h-32"
+        className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-ink/80 via-ink/30 to-transparent"
       />
 
-      <div className="relative mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-5 py-4 sm:px-8 sm:py-6">
+      <div className="relative mx-auto flex h-14 max-w-[1500px] items-center justify-between gap-3 px-4 sm:h-16 sm:gap-6 sm:px-8 lg:px-10">
         <Link
-          href="/"
-          className="pointer-events-auto flex items-center gap-2.5 sm:gap-3.5"
-          aria-label="KV Delight — home"
+          href="#top"
+          className="-ml-1 flex min-h-[2.75rem] items-center gap-2.5 rounded-sm px-1"
+          aria-label="KV Delight — back to the top"
         >
-          <BrandMark className="h-10 sm:h-12" priority />
-          <span className="flex flex-col gap-1.5">
-            <span className="wordmark text-[0.62rem] sm:text-[0.7rem]">
-              KV Delight
-            </span>
-            <span className="tagline hidden text-[0.46rem] text-cream/45 sm:block">
-              Every Bite Brings Delight
-            </span>
+          <BrandMark className="h-[1.75rem] sm:h-8" />
+          <span className="wordmark hidden text-[0.6rem] sm:inline sm:text-[0.64rem]">
+            KV Delight
           </span>
         </Link>
 
-        <nav aria-label="Product chapters" className="pointer-events-auto hidden sm:block">
-          <ul className="flex items-center gap-7">
-            {chapters.map((c) => (
-              <li key={c.id}>
-                {c.state === "live" ? (
+        <nav aria-label="Product chapters">
+          <ul className="flex items-center gap-1 sm:gap-3 lg:gap-5">
+            {SECTIONS.map((section) => {
+              const isActive = active === section.id;
+              return (
+                <li key={section.id}>
                   <a
-                    href={`#${c.id}`}
-                    className="group relative inline-flex py-2 text-[0.66rem] uppercase tracking-[0.28em] text-cream transition-colors hover:text-gold"
+                    href={`#${section.id}`}
+                    aria-current={isActive ? "true" : undefined}
+                    className={`group relative inline-flex min-h-[2.75rem] items-center rounded-sm px-2 text-[0.54rem] uppercase tracking-[0.16em] transition-colors sm:px-1 sm:text-[0.6rem] sm:tracking-[0.22em] ${
+                      isActive ? "text-gold" : "text-cream/70 hover:text-cream"
+                    }`}
                   >
-                    {c.label}
+                    {section.nav}
                     <span
                       aria-hidden="true"
-                      className="absolute inset-x-0 -bottom-0.5 h-px origin-left scale-x-0 bg-gold/70 transition-transform duration-300 group-hover:scale-x-100"
+                      className={`absolute inset-x-2 bottom-1.5 h-px origin-left bg-gold/80 transition-transform duration-300 sm:inset-x-1 ${
+                        isActive ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100"
+                      }`}
                     />
                   </a>
-                ) : (
-                  <span
-                    aria-disabled="true"
-                    title="Next in the film — not built yet"
-                    className="inline-flex py-2 text-[0.66rem] uppercase tracking-[0.28em] text-cream/25"
-                  >
-                    {c.label}
-                  </span>
-                )}
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </nav>
       </div>
+
+      {/* Without JavaScript the observer never runs; this bar is the only
+          navigation on the page, so a noscript rule pins it open. */}
+      <noscript>
+        <style>{`.site-header{transform:none !important;opacity:1 !important}`}</style>
+      </noscript>
     </header>
   );
 }

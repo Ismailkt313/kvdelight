@@ -349,7 +349,7 @@ export default function BreadChapter() {
       id="bread"
       ref={sectionRef}
       aria-labelledby="bread-heading"
-      className="relative h-[520svh]"
+      className="relative h-[460svh]"
     >
       <div className="sticky top-0 h-[100svh] w-full overflow-hidden">
         {/* atmosphere */}
