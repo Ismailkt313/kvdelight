@@ -75,9 +75,15 @@ cut faces get a different material without a second draw object.
 > - Crust colour is driven by **height up the loaf**, not by the surface normal.
 >   A squircle wall is vertical, so a normal-driven ramp puts `ny ≈ 0` along the
 >   whole side and floods the loaf with the pale "touched the tin" colour.
-> - Several `gsap.quickSetter(el, "scale" | "y" | "rotate")` on the *same* node
->   each keep their own transform cache and silently clobber one another, so the
->   pack poses are written by one series of setters inside one `update()`.
+> - **Do not use `gsap.quickSetter` for transforms.** GSAP resolves the `scale`
+>   alias to the literal string `"scaleX,scaleY"`, and `quickSetter` applies that
+>   alias without the comma guard `getSetter` has. On browsers that do not take
+>   GSAP's CSS path it falls through to `setAttribute("scaleX,scaleY", …)`, which
+>   WebKit rejects with `InvalidCharacterError: Invalid qualified name`. That is
+>   what crashed the site on iPhone; Chrome silently creates a junk attribute, so
+>   it never showed on desktop. All poses now go through `lib/domPaint.ts`, which
+>   writes `el.style` directly — no aliases, no per-node transform cache, nothing
+>   that can throw.
 > - The spread does **not** do a full 360°: a long loaf pointed at the camera
 >   collapses into a tunnel. It sweeps 40° to a three-quarter instead.
 
@@ -184,21 +190,25 @@ Remove the panel (and this section) once the device is confirmed healthy.
    (`public/assets/style/`), and the `style/` directory does not exist yet.
 7. Soft buns and cream buns are untouched placeholders, by instruction.
 
-### The iPhone XS crash
+### The iPhone crash
 
-Root cause: `useReducedMotion` subscribed with `mql.addEventListener("change")`.
-`MediaQueryList.addEventListener` only exists from **Safari 14**; older iOS only
-has the deprecated `addListener`. The call threw `TypeError: ... is not a
-function` inside a React passive effect, and because that hook is used by
-`BreadChapter` — which sits *outside* `StageBoundary` — the throw went straight
-to the route error boundary and replaced the page. Desktop browsers have
-supported the modern form for years, which is why only the phone failed, and why
-the 3D stage was never the culprit.
+Two separate faults, both confirmed on the device rather than guessed:
 
-`addMediaListener()` now prefers `addEventListener`, falls back to
-`addListener`, and finally to a no-op. `ResizeObserver` (iOS 13.4+) and
-`IntersectionObserver` gained the same treatment, falling back to `window.resize`
-and "always visible" respectively.
+1. **`InvalidCharacterError: Invalid qualified name: 'scaleX,scaleY'`** — the
+   real crash. `gsap.quickSetter(packEl, "scale")` resolved GSAP's `scale` alias
+   to the string `"scaleX,scaleY"` and, on WebKit, applied it as an *attribute
+   name*. A comma is illegal in a qualified name, so `setAttribute` threw, inside
+   a passive effect, outside `StageBoundary` — straight to the route boundary and
+   the page was replaced. Chrome takes a different GSAP branch, which is why only
+   the phone failed. All motion now uses `lib/domPaint.ts` (plain `style`
+   writes), reproduced and verified against a real DOM before fixing.
+2. **`MediaQueryList.addEventListener`** — only exists from Safari 14; older iOS
+   has just `addListener`. Fixed earlier with `addMediaListener()`, which prefers
+   the modern form, falls back to `addListener`, then to a no-op. `ResizeObserver`
+   (iOS 13.4+) and `IntersectionObserver` got the same treatment.
+
+Neither was a WebGL problem; the 3D stage was never the culprit, and its fallback
+had already been doing its job.
 
 ### Confirming on the phone
 
