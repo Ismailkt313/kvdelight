@@ -39,15 +39,39 @@ Nothing is fetched from a third party at build time or at runtime.
 | `src/lib/choreography.ts` | Scene timings, caption windows, knife + seam schedules. Shared by DOM and WebGL. |
 | `src/lib/sliceLayout.ts` | Slice transforms, arc fan, yaw, camera framing, caption clearance. Pure maths. |
 | `src/lib/loaf.ts` | The original whole-loaf geometry, its `fbm` noise (reused by the slices) and the crust material. |
-| `src/components/site/Header.tsx`, `ProgressRail.tsx` | Masthead (crest + wordmark + chapter nav) and numbered progress rail. |
+| `src/components/site/Header.tsx` | The compact sticky masthead. Hidden at the top of the page; revealed when the hero's own lockup leaves the screen. |
+| `src/components/site/ProgressRail.tsx` | Numbered progress rail, wide screens only. |
+| `public/assets/hero/` | Two **derived** atmosphere plates cut from `bread-hero-scene`: the kitchen window and the flour-dusted table. |
 | `public/assets/` | Supplied assets only — see `public/assets/CREDITS.md`. |
 
 ## The opening act
+
+### One logo at a time
+
+The hero owns the brand at the top of the page: one large crest, one wordmark,
+one headline. The sticky header is **not on screen there** — it would be a second
+copy of the same mark a few hundred pixels away. `Header` watches `#hero-brand`
+with an `IntersectionObserver` and slides in only when that lockup has left the
+top, so the bar arrives exactly as the hero's identity leaves.
+
+An observer rather than a scroll offset is deliberate: a pixel threshold has to
+guess the hero's height and drifts on phones, where `100svh` changes as the URL
+bar collapses. While hidden the header is `inert` (rendered in the server HTML,
+not applied after hydration), so its links are not tab stops behind an invisible
+bar. With JavaScript off the observer never runs, so a `<noscript>` rule pins it
+open — it is the only navigation on the page.
 
 The page used to open *inside* the bread chapter, so the first frame was the 3D
 loaf filling the screen with the headline laid over it. `Hero.tsx` now owns the
 first screen: crest, wordmark, headline, one line of support, and the supplied
 loaf photograph — and the cutting film only begins after it scrolls away.
+
+The backdrop is the brand's own photography, not stock: the window light and the
+flour-dusted table in `public/assets/hero/` are crops of `bread-hero-scene`, the
+same still the bread chapter falls back to — the same room, the same light, the
+same table the loaf is standing on. Both are masked into the ink and carry no
+baked-in copy (the crops are taken left of and below the poster's typeset
+headline), so nothing repeats and nothing competes with the product.
 
 The badge needed a decision. `kv-delight-logo-reference.png` is **red and gold
 ink with no plate**: the white behind it is the page it was exported on, and its

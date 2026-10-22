@@ -355,6 +355,8 @@ export default function BunsChapter() {
           <img
             src="/assets/brand/packaging-buns-8pack.webp"
             alt="KV Delight soft buns in their sealed eight-pack."
+            loading="lazy"
+            decoding="async"
             width={1536}
             height={1024}
             className="h-auto w-[86vw] max-h-[46svh] object-contain drop-shadow-[0_36px_60px_rgba(0,0,0,0.6)] sm:w-auto sm:max-h-[58svh] sm:max-w-[76vw]"

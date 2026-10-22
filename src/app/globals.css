@@ -125,18 +125,120 @@ body {
 
 /* The hero photograph melts into the ink instead of ending on a hard edge. */
 .loaf-plate {
+  /* Slightly tighter than before: the hero now has its own photographic
+     backdrop, so the plate has to dissolve into it rather than sit on it. */
   -webkit-mask-image: radial-gradient(
-    128% 116% at 52% 48%,
-    #000 46%,
-    rgba(0, 0, 0, 0.86) 68%,
-    transparent 92%
+    122% 112% at 52% 48%,
+    #000 34%,
+    rgba(0, 0, 0, 0.88) 62%,
+    rgba(0, 0, 0, 0.35) 82%,
+    transparent 94%
   );
   mask-image: radial-gradient(
-    128% 116% at 52% 48%,
-    #000 46%,
-    rgba(0, 0, 0, 0.86) 68%,
-    transparent 92%
+    122% 112% at 52% 48%,
+    #000 34%,
+    rgba(0, 0, 0, 0.88) 62%,
+    rgba(0, 0, 0, 0.35) 82%,
+    transparent 94%
   );
+}
+
+/* ---------------------------------------------------------- hero plates -- */
+/*
+ * The hero backdrop is the brand's own photography, cut into two atmosphere
+ * plates in Hero.tsx. Both are decorative, both are masked into the ink, and
+ * neither carries a hard edge anywhere on screen — the window is light, the
+ * table is ground, and the product sits between them.
+ */
+.hero-window {
+  position: absolute;
+  top: -16%;
+  left: -30%;
+  width: min(104vw, 720px);
+  height: auto;
+  opacity: 0.5;
+  mix-blend-mode: screen;
+  filter: saturate(0.9) contrast(1.04);
+  user-select: none;
+  -webkit-mask-image: radial-gradient(
+    58% 56% at 48% 34%,
+    #000 0%,
+    rgba(0, 0, 0, 0.85) 38%,
+    rgba(0, 0, 0, 0) 78%
+  );
+  mask-image: radial-gradient(
+    58% 56% at 48% 34%,
+    #000 0%,
+    rgba(0, 0, 0, 0.85) 38%,
+    rgba(0, 0, 0, 0) 78%
+  );
+}
+
+@media (min-width: 640px) {
+  .hero-window {
+    top: -22%;
+    left: -18%;
+    width: min(62vw, 720px);
+    opacity: 0.55;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero-window {
+    top: -26%;
+    left: -8%;
+    width: min(44vw, 760px);
+    opacity: 0.6;
+  }
+}
+
+.hero-table {
+  position: absolute;
+  left: 50%;
+  bottom: -1%;
+  width: max(126%, 860px);
+  max-width: none;
+  height: auto;
+  transform: translateX(-50%);
+  opacity: 0.55;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    rgba(0, 0, 0, 0.9) 30%,
+    rgba(0, 0, 0, 0.4) 62%,
+    rgba(0, 0, 0, 0) 92%
+  );
+  mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    rgba(0, 0, 0, 0.9) 30%,
+    rgba(0, 0, 0, 0.4) 62%,
+    rgba(0, 0, 0, 0) 92%
+  );
+}
+
+@media (min-width: 1024px) {
+  .hero-table {
+    width: 100%;
+    opacity: 0.62;
+  }
+}
+
+/* The phone chapter menu arrives rather than appearing. */
+.menu-enter {
+  animation: menu-enter 260ms var(--ease-cine) both;
+}
+
+@keyframes menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .eyebrow {
@@ -168,7 +270,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .film-grain::before,
   .vignette::after,
-  .stage-enter {
+  .stage-enter,
+  .menu-enter {
     animation: none !important;
   }
   .film-grain::before {
