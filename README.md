@@ -344,23 +344,23 @@ nothing here collects anything.
 
 ### The WhatsApp number is configuration, not a guess
 
-`src/lib/founder.ts` holds the whole contact surface. The number is **empty on
-purpose**: a wrong number sends a customer's message to a stranger, so it is not
-invented here.
+`src/lib/founder.ts` holds the whole contact surface, and the number lives there
+once, in international format, digits only — never in markup.
 
 ```ts
 export const FOUNDER: Founder = {
   name: "Sameer KV",
-  whatsappNumber: "", // ← digits only, international format: "919876543210"
+  whatsappNumber: "919495146738", // ← +91 94951 46738, no "+", no spaces
   …
 };
 ```
 
-Until it is set, the section renders the same button as a **disabled** control
-with the note *"WhatsApp number to be confirmed"*, derived from
-`WHATSAPP_CONFIGURED`, so it is obvious on screen rather than silently broken.
-Set the number and the same component renders a link with
-`target="_blank" rel="noopener noreferrer"` to:
+`WHATSAPP_CONFIGURED` validates it against `/^\d{8,15}$/`, and the component
+branches on that: a valid number renders a link with
+`target="_blank" rel="noopener noreferrer"`, and an empty or malformed one renders
+the same button **disabled** with the note *"WhatsApp number not configured
+yet."* — so a change to the number can never quietly become a broken or
+misrouted link. Either way the URL is:
 
 ```
 https://wa.me/<digits>?text=<encodeURIComponent(message)>
@@ -511,10 +511,10 @@ Remove the panel (and this section) once the device is confirmed healthy.
 10. The cream bun's nozzle is deliberately semi-metallic (0.55) and lit by a
     dedicated light: a fully metallic material without an environment map renders
     black. It reads as steel; it is not a physically exact steel.
-11. **Sameer's WhatsApp number still has to be supplied.** `FOUNDER.whatsappNumber`
-    is empty, so the call to action renders disabled with a visible note. The URL
-    builder, the encoding and the new-tab behaviour are all in place and checked;
-    only the number is missing, and it is one string in `src/lib/founder.ts`.
+11. **The WhatsApp link has not been opened end to end.** The number is set
+    (`919495146738`) and the generated URL is checked, but opening it lands in the
+    WhatsApp app, which no browser in this sandbox can do. Dial it once on a phone
+    to confirm the account is Sameer's and the prefill arrives intact.
 12. The founder section is checked by build, SSR markup and the generated CSS —
     not on a screen. There is no browser in this sandbox, so the portrait crop and
     the grade are reasoned from the asset's dimensions (1200 × 1074 into a 5:4,

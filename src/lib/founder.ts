@@ -1,22 +1,22 @@
 /**
  * Founder contact.
  *
- * The WhatsApp number is **configuration, not a constant to guess at**. A wrong
- * number sends a customer's message to a stranger, so the field is left empty
- * until Sameer's verified account is supplied, and the section renders its call
- * to action in a disabled state rather than inventing one.
+ * The WhatsApp number is **configuration, not a constant baked into markup**. A
+ * wrong number sends a customer's message to a stranger, so it lives in one
+ * place, in international format, **digits only** — no `+`, spaces, dashes or
+ * brackets:
  *
- * To go live, set `whatsappNumber` to the verified number in international
- * format, **digits only** — no `+`, spaces, dashes or brackets:
+ *     9495146738  →  "919495146738"   // +91 94951 46738
  *
- *     whatsappNumber: "919876543210"   // +91 98765 43210
- *
- * Everything else (the label, the message, the URL encoding) stays as it is.
+ * If the number ever changes, change this string. Everything else — the label,
+ * the message, the URL encoding — stays as it is. If it is emptied or malformed,
+ * the section falls back to a disabled button that says the number is not
+ * configured, rather than linking somewhere wrong.
  */
 
 export type Founder = {
   name: string;
-  /** Digits only, international format. Empty until the real number arrives. */
+  /** Digits only, international format (country code first, no `+`). */
   whatsappNumber: string;
   /** The invitation shown in the section. */
   quote: string;
@@ -26,7 +26,7 @@ export type Founder = {
 
 export const FOUNDER: Founder = {
   name: "Sameer KV",
-  whatsappNumber: "",
+  whatsappNumber: "919495146738",
   quote:
     "Interested in our products? Connect with Sameer to learn more about KV Delight products, product details, and business enquiries.",
   message:
@@ -39,7 +39,8 @@ const VALID_NUMBER = /^\d{8,15}$/;
 export const WHATSAPP_CONFIGURED = VALID_NUMBER.test(FOUNDER.whatsappNumber);
 
 /**
- * `https://wa.me/<digits>?text=<encoded>`, or `null` when unconfigured.
+ * `https://wa.me/<digits>?text=<encoded>`, or `null` when the number is not a
+ * valid sequence of 8–15 digits.
  *
  * `encodeURIComponent` is what makes the prefill survive punctuation: the
  * message contains commas, an apostrophe-free "Hi", and a question mark, all of
