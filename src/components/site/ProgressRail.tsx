@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 const CHAPTERS = [
   { label: "Bread", state: "live" },
-  { label: "Soft Buns", state: "soon" },
+  { label: "Soft Buns", state: "live" },
   { label: "Cream Buns", state: "soon" },
 ] as const;
 

@@ -32,6 +32,13 @@ export type QualitySettings = {
   physicalMaterials: boolean;
   /** Texture anisotropy — cheap, but the first thing to drop on weak GPUs. */
   anisotropy: boolean;
+  /**
+   * Bun stage: latitude rings and radial segments per bun half. The bun is a
+   * surface of revolution, so triangles scale as latitudes × segments × 2 —
+   * `30 × 56` is ~6.7k triangles for the pair, `14 × 24` is ~1.3k.
+   */
+  bunLatitudes: number;
+  bunSegments: number;
 };
 
 const HIGH: QualitySettings = {
@@ -48,6 +55,8 @@ const HIGH: QualitySettings = {
   extraLights: 6,
   physicalMaterials: true,
   anisotropy: true,
+  bunLatitudes: 30,
+  bunSegments: 56,
 };
 
 const LOW: QualitySettings = {
@@ -64,6 +73,8 @@ const LOW: QualitySettings = {
   extraLights: 4,
   physicalMaterials: false,
   anisotropy: true,
+  bunLatitudes: 18,
+  bunSegments: 32,
 };
 
 /**
@@ -86,6 +97,8 @@ export const SAFE: QualitySettings = {
   extraLights: 3,
   physicalMaterials: false,
   anisotropy: false,
+  bunLatitudes: 14,
+  bunSegments: 24,
 };
 
 export function settingsFor(tier: QualityTier): QualitySettings {

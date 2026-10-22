@@ -1,7 +1,8 @@
 # KV Delight — scroll-controlled product film
 
-Foundation + **bread chapter, rebuilt as a slice film**. Soft buns and cream
-buns are still placeholders and are intentionally not built yet.
+Foundation + **bread chapter, rebuilt as a slice film** + **chapter two, the
+soft bun**. Cream buns are still a placeholder and are intentionally not built
+yet.
 
 ```
 Next.js 15 (App Router) · React 19 · TypeScript · Tailwind v4 · GSAP ScrollTrigger · three.js
@@ -28,6 +29,10 @@ Nothing is fetched from a third party at build time or at runtime.
 | `src/components/site/BrandMark.tsx` | The supplied mark on a cream oval, at one ratio, from one asset. |
 | `src/components/story/BreadChapter.tsx` | The chapter's DOM and scroll driver: five caption beats, the packaging hand-off, reduced-motion document. |
 | `src/components/three/LoafStage.tsx` | three.js stage: lighting, environment, slice meshes, knife, camera, render loop. |
+| `src/components/story/BunsChapter.tsx` | Chapter two's DOM and scroll driver: four caption beats plus the sealed pack, reduced-motion document. |
+| `src/components/three/BunStage.tsx` | The bun's three.js stage: lights, crust/crumb materials, press and split transforms, camera, on-demand render loop. |
+| `src/lib/bun.ts` | **Pre-separated bun halves**: two closed solids, each with a crust shell and a crumb cut face. No runtime cutting. |
+| `src/lib/bunChoreography.ts` | Bun timings, press/split maths, camera framing and the screen-space guarantee that keeps the bun off the captions. |
 | `src/lib/slices.ts` | **Sliced loaf geometry**: ten closed slabs, each with a crust shell, crumb cut faces and a crust rim. |
 | `src/lib/knife.ts` | Serrated bread knife, built from geometry (extruded profile + handle + rivets). |
 | `src/lib/breadTextures.ts` | Canvas-generated crumb colour/bump maps and blade grain. No image files. |
@@ -258,7 +263,29 @@ Remove the panel (and this section) once the device is confirmed healthy.
    retouched to match.
 6. The five coffee-website style screenshots are still missing
    (`public/assets/style/`), and the `style/` directory does not exist yet.
-7. Soft buns and cream buns are untouched placeholders, by instruction.
+7. Cream buns are an untouched placeholder, by instruction. Soft buns are built;
+   its one honest compromise is that the "cut" is two closed solids modelled to
+   meet, not a mesh severed at runtime — see `src/lib/bun.ts`.
+
+### How chapter two was verified without a GPU
+
+There is no headless browser here, so the bun film is checked as arithmetic and
+geometry rather than by screenshots:
+
+- `.tmp/check-bun.ts` (throwaway) asserted the half meshes are watertight and
+  outward-wound, that the squash keeps the bun's volume within 3%, that the
+  halves are closed at p = 0 and fully parted by p = 0.62, that exactly one
+  caption is legible at any progress value, and that — at ten viewport sizes from
+  320×680 to 2560×1080 — the projected bun never leaves the frame and never
+  enters the caption strip. The projection is the *same* `viewFor` the stage
+  calls, so the check cannot drift from the render.
+- `.tmp/silhouette.ts` (throwaway) projected the real vertices through the real
+  camera and printed the frame as ASCII, which is how the hinge pose was fixed:
+  the cap's far edge was dipping behind the base and the two halves were merging
+  into one blob.
+- What this does **not** prove is how the crust and crumb read in colour, or how
+  the film feels on a real iPhone. Open the site with `?diag=1` on the device to
+  see the tier and any renderer error.
 
 ### The iPhone crash
 

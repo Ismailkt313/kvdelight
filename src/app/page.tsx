@@ -3,18 +3,9 @@ import BrandMark from "@/components/site/BrandMark";
 import Hero from "@/components/site/Hero";
 import ProgressRail from "@/components/site/ProgressRail";
 import BreadChapter from "@/components/story/BreadChapter";
+import BunsChapter from "@/components/story/BunsChapter";
 
 const UPCOMING = [
-  {
-    id: "buns",
-    index: "02",
-    title: "Soft Buns",
-    note: "Same scroll-film grammar, applied to the eight-pack.",
-    img: "/assets/brand/packaging-buns-8pack.webp",
-    alt: "KV Delight soft buns, eight in a clear film pack.",
-    w: 1536,
-    h: 1024,
-  },
   {
     id: "cream-buns",
     index: "03",
@@ -43,8 +34,9 @@ export default function Home() {
       <main>
         <Hero />
         <BreadChapter />
+        <BunsChapter />
 
-        {/* Next chapters — placeholders only, not built in this pass. */}
+        {/* Next chapter — a placeholder only, not built in this pass. */}
         <section
           aria-labelledby="next-heading"
           className="relative mx-auto max-w-[1500px] px-5 py-24 sm:px-10 sm:py-32 lg:pr-24"
