@@ -40,6 +40,8 @@ Nothing is fetched from a third party at build time or at runtime.
 | `src/lib/creamChoreography.ts` | Cream timings, the hinge/fill/close/cut schedule, the nozzle's run along the long axis, camera framing solved against the real projection. |
 | `src/components/site/FounderSection.tsx` | The closing invitation: portrait, headline, founder name, and the single WhatsApp call to action. |
 | `src/lib/founder.ts` | Founder copy plus the WhatsApp number as configuration, and the `wa.me` URL builder. |
+| `src/components/site/Footer.tsx` | The sign-off: centred identity and tagline, the three chapter links, centred copyright. |
+| `src/components/site/WhatsAppCta.tsx` | The page's single WhatsApp control, with its built-in disabled fallback. Used by the founder section only. |
 | `src/lib/sections.ts` | The chapter list — one source of truth for the ids in the page and the labels in the header. |
 | `src/lib/slices.ts` | **Sliced loaf geometry**: ten closed slabs, each with a crust shell, crumb cut faces and a crust rim. |
 | `src/lib/knife.ts` | Serrated bread knife, built from geometry (extruded profile + handle + rivets). |
@@ -379,6 +381,35 @@ decodeURIComponent(url.split("text=")[1]) === FOUNDER.message;
 `encodeURIComponent` is what keeps the comma, the full stop and the question mark
 intact through WhatsApp's query string; the check decodes the URL back and
 compares it to the source string.
+
+## The footer
+
+The page ends on the founder invitation, so the footer is the sign-off and
+nothing more. One centred column, the same at every width — a phone and a
+1500 px screen show the same stack, only larger. No breakpoint re-flows it.
+
+1. **Identity, centred** — the crest on its cream oval, the wordmark beneath it,
+   the tagline *Softness · Freshness · Happiness* directly under that.
+2. **Products** — Bread, Soft Buns, Cream Buns as `#bread`, `#buns` and
+   `#cream-buns` anchors, one centred row with gold dot separators and 44 px tap
+   targets. They inherit the document's smooth scroll, and because that is CSS
+   and not a JS tween, the scroll events the three chapters scrub from still fire.
+3. **Sign-off, centred** — `© <year> KV Delight` and *Made with care*, stacked
+   close together under a hairline, in cream and muted gold.
+
+What is **not** there is the point: no address, no email, no social row, no
+opening hours, no legal paragraph, and **no second WhatsApp button** — the
+founder section immediately above owns that action, so repeating it here would
+offer the same tap twice within one screen. `WhatsAppCta` is therefore the page's
+single WhatsApp control, rendered only by the founder section.
+
+- **Nothing can overflow.** The column is `text-center` with `flex-wrap` links,
+  no `nowrap` and no fixed widths, so at 320 px the worst case is a wrapped link
+  row rather than a sideways scroll.
+- **Contrast on ink-deep:** wordmark 17.7:1, tagline 8.6:1, *Products* 7.0:1,
+  links 11.2:1, copyright 8.4:1, *Made with care* 5.5:1.
+- **`© <year>` is stamped at build time** from `new Date().getFullYear()`, so the
+  line can't go stale in the source.
 
 ## Device safety and the mobile tier
 
