@@ -2,6 +2,8 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import StageFallback from "@/components/three/StageFallback";
+import DiagnosticOverlay from "@/components/site/DiagnosticOverlay";
+import { reportError } from "@/lib/diagnostics";
 
 type Props = {
   children: ReactNode;
@@ -35,13 +37,20 @@ export default class StageBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
-    // Keep the detail in the console for debugging, off the visible page.
+    // Console for the tethered case, and the on-screen report for the phone.
     console.error("[KV Delight] 3D stage failed, showing still:", error, info);
+    reportError("react:stage-boundary", error, info.componentStack ?? undefined);
   }
 
   render() {
     if (this.state.message !== null) {
-      return <StageFallback reason={this.state.message} />;
+      return (
+        <>
+          <StageFallback reason={this.state.message} />
+          {/* Only visible with ?diag=1 — the phone-readable crash report. */}
+          <DiagnosticOverlay />
+        </>
+      );
     }
     return this.props.children;
   }

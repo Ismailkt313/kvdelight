@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import DiagnosticOverlay from "@/components/site/DiagnosticOverlay";
+import { reportError } from "@/lib/diagnostics";
 
 /**
  * Last-resort boundary: catches failures in the root layout itself, where the
@@ -15,6 +17,7 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("[KV Delight] root error:", error);
+    reportError("react:global-boundary", error, `digest=${error.digest ?? "none"}`);
   }, [error]);
 
   return (
@@ -31,6 +34,7 @@ export default function GlobalError({
           padding: "24px",
         }}
       >
+        <DiagnosticOverlay force />
         <div style={{ maxWidth: "28rem", textAlign: "center" }}>
           <p
             style={{

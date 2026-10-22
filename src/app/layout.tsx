@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import DiagnosticsBoot from "@/components/site/DiagnosticsBoot";
 
 /**
  * Self-hosted clones of the two original typefaces (Cormorant Garamond and
@@ -53,7 +54,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${display.variable} ${sans.variable}`}>
-      <body className="film-grain vignette antialiased">{children}</body>
+      <body className="film-grain vignette antialiased">
+        <DiagnosticsBoot />
+        {children}
+      </body>
     </html>
   );
 }

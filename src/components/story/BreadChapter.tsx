@@ -1,11 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import StageBoundary from "@/components/three/StageBoundary";
+import { note, reportError } from "@/lib/diagnostics";
 import { BEATS, TIMELINE, bell, smoothstep } from "@/lib/choreography";
 
 const LoafStage = dynamic(() => import("@/components/three/LoafStage"), {
@@ -26,9 +27,19 @@ export default function BreadChapter() {
   const cueRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef(0);
   const reduced = useReducedMotion();
+  // Set when the scroll choreography itself fails: the chapter then renders its
+  // static, readable document instead of blanking the route.
+  const [motionFailed, setMotionFailed] = useState(false);
 
   const onReady = useCallback(() => {
-    ScrollTrigger.refresh();
+    // Called from inside the 3D stage's setup; a throw here would be reported
+    // as a stage failure, so keep ScrollTrigger's problems to itself.
+    try {
+      ScrollTrigger.refresh();
+      note("choreography", "scroll triggers refreshed");
+    } catch (error) {
+      reportError("choreography:refresh-on-ready", error);
+    }
   }, []);
 
   useEffect(() => {
@@ -38,21 +49,59 @@ export default function BreadChapter() {
     const section = sectionRef.current;
     if (!section) return;
 
+    // These refs used to be non-null asserted. A null target makes
+    // `gsap.quickSetter` throw, and this effect is *outside* StageBoundary, so
+    // that throw reached the route error screen. Check them instead.
+    const packEl = packRef.current;
+    const packCopyEl = packCopyRef.current;
+    const packShadowEl = packShadowRef.current;
+    const cueEl = cueRef.current;
+    if (!packEl || !packCopyEl || !packShadowEl || !cueEl) {
+      note("choreography", "skipped: one or more motion refs were not mounted");
+      return;
+    }
+
     const beatEls = beatRefs.current.filter(Boolean) as HTMLDivElement[];
-    const setters = {
-      y: beatEls.map((el) => gsap.quickSetter(el, "y", "px") as (v: number) => void),
-      opacity: beatEls.map(
-        (el) => gsap.quickSetter(el, "opacity") as (v: number) => void,
-      ),
-      packY: gsap.quickSetter(packRef.current!, "y", "px") as (v: number) => void,
-      packOpacity: gsap.quickSetter(packRef.current!, "opacity") as (v: number) => void,
-      packScale: gsap.quickSetter(packRef.current!, "scale") as (v: number) => void,
-      copyOpacity: gsap.quickSetter(packCopyRef.current!, "opacity") as (v: number) => void,
-      copyY: gsap.quickSetter(packCopyRef.current!, "y", "px") as (v: number) => void,
-      cueOpacity: gsap.quickSetter(cueRef.current!, "opacity") as (v: number) => void,
-      packShadow: gsap.quickSetter(packShadowRef.current!, "opacity") as (v: number) => void,
-      packShadowScale: gsap.quickSetter(packShadowRef.current!, "scaleX") as (v: number) => void,
+    if (beatEls.length !== BEATS.length) {
+      note(
+        "choreography",
+        `skipped: ${beatEls.length}/${BEATS.length} caption nodes mounted`,
+      );
+      return;
+    }
+
+    let setters: {
+      y: ((v: number) => void)[];
+      opacity: ((v: number) => void)[];
+      packY: (v: number) => void;
+      packOpacity: (v: number) => void;
+      packScale: (v: number) => void;
+      copyOpacity: (v: number) => void;
+      copyY: (v: number) => void;
+      cueOpacity: (v: number) => void;
+      packShadow: (v: number) => void;
+      packShadowScale: (v: number) => void;
     };
+    try {
+      setters = {
+        y: beatEls.map((el) => gsap.quickSetter(el, "y", "px") as (v: number) => void),
+        opacity: beatEls.map(
+          (el) => gsap.quickSetter(el, "opacity") as (v: number) => void,
+        ),
+        packY: gsap.quickSetter(packEl, "y", "px") as (v: number) => void,
+        packOpacity: gsap.quickSetter(packEl, "opacity") as (v: number) => void,
+        packScale: gsap.quickSetter(packEl, "scale") as (v: number) => void,
+        copyOpacity: gsap.quickSetter(packCopyEl, "opacity") as (v: number) => void,
+        copyY: gsap.quickSetter(packCopyEl, "y", "px") as (v: number) => void,
+        cueOpacity: gsap.quickSetter(cueEl, "opacity") as (v: number) => void,
+        packShadow: gsap.quickSetter(packShadowEl, "opacity") as (v: number) => void,
+        packShadowScale: gsap.quickSetter(packShadowEl, "scaleX") as (v: number) => void,
+      };
+    } catch (error) {
+      reportError("choreography:quicksetter", error);
+      setMotionFailed(true);
+      return;
+    }
 
     const update = (p: number) => {
       // Captions — driven by the same windows the geometry uses.
@@ -81,32 +130,56 @@ export default function BreadChapter() {
 
     update(0);
 
-    const st = ScrollTrigger.create({
-      trigger: section,
-      start: "top top",
-      end: "bottom bottom",
-      scrub: true,
-      invalidateOnRefresh: true,
-      onUpdate(self) {
-        const p = self.progress;
-        progressRef.current = p;
-        update(p);
-      },
-    });
+    let st: ScrollTrigger | undefined;
+    try {
+      st = ScrollTrigger.create({
+        trigger: section,
+        start: "top top",
+        end: "bottom bottom",
+        scrub: true,
+        invalidateOnRefresh: true,
+        onUpdate(self) {
+          try {
+            const p = self.progress;
+            progressRef.current = p;
+            update(p);
+          } catch (error) {
+            reportError("choreography:onUpdate", error);
+          }
+        },
+      });
+    } catch (error) {
+      // ScrollTrigger refusing to initialise (unusual, but it happens where
+      // layout is zero-height at mount) must not take the route down.
+      reportError("choreography:scrolltrigger", error);
+      setMotionFailed(true);
+      return;
+    }
 
     // Fonts and images change layout height — re-measure once they settle.
-    const refresh = () => ScrollTrigger.refresh();
+    const refresh = () => {
+      try {
+        ScrollTrigger.refresh();
+      } catch (error) {
+        reportError("choreography:refresh", error);
+      }
+    };
     window.addEventListener("load", refresh);
     document.fonts?.ready.then(refresh).catch(() => {});
 
     return () => {
       window.removeEventListener("load", refresh);
-      st.kill();
+      try {
+        st?.kill();
+      } catch {
+        /* ignore */
+      }
     };
   }, [reduced]);
 
   /* -------------------------------------------------- reduced-motion view -- */
-  if (reduced) {
+  // Also the destination for a failed choreography: the same readable document.
+  if (reduced || motionFailed) {
     return (
       <section id="bread" aria-labelledby="bread-heading" className="relative">
         <div className="mx-auto max-w-6xl px-5 pb-8 pt-28 sm:px-8 sm:pt-36">

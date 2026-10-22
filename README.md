@@ -129,6 +129,22 @@ hydration mismatch. Touch-first, narrow, low-core or low-memory devices get:
 | materials | Physical (sheen/clearcoat) | **Standard** |
 | environment map | on | **off** |
 
+## Diagnostics (temporary)
+
+The iPhone XS crash could not be reproduced off-device, so the app now reports on
+itself. Open any URL with **`?diag=1`** to get an on-screen panel listing every
+captured exception with its stack, shader compile/link logs, context loss and a
+breadcrumb trail of the scene-setup steps (`renderer created`, `capabilities`,
+`environment built/skipped`, `textures`, `geometry`, `prewarm`, `first frame`),
+plus the WebGL capability dump and a **Copy** button. The same panel appears on
+the error screens.
+
+`lib/diagnostics.ts` also installs `window.error` and `unhandledrejection`
+handlers, so errors that never reach React are recorded too — those were
+previously invisible.
+
+Remove the panel (and this section) once the device is confirmed healthy.
+
 ## Accessibility & performance
 
 - `prefers-reduced-motion: reduce` swaps the chapter for a readable, static,
@@ -167,6 +183,22 @@ hydration mismatch. Touch-first, narrow, low-core or low-memory devices get:
 6. The five coffee-website style screenshots are still missing
    (`public/assets/style/`), and the `style/` directory does not exist yet.
 7. Soft buns and cream buns are untouched placeholders, by instruction.
+
+### The iPhone XS crash
+
+Root cause: `useReducedMotion` subscribed with `mql.addEventListener("change")`.
+`MediaQueryList.addEventListener` only exists from **Safari 14**; older iOS only
+has the deprecated `addListener`. The call threw `TypeError: ... is not a
+function` inside a React passive effect, and because that hook is used by
+`BreadChapter` — which sits *outside* `StageBoundary` — the throw went straight
+to the route error boundary and replaced the page. Desktop browsers have
+supported the modern form for years, which is why only the phone failed, and why
+the 3D stage was never the culprit.
+
+`addMediaListener()` now prefers `addEventListener`, falls back to
+`addListener`, and finally to a no-op. `ResizeObserver` (iOS 13.4+) and
+`IntersectionObserver` gained the same treatment, falling back to `window.resize`
+and "always visible" respectively.
 
 ### Confirming on the phone
 
