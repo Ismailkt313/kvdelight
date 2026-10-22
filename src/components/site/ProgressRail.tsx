@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-
-const CHAPTERS = [
-  { label: "Bread", state: "live" },
-  { label: "Soft Buns", state: "live" },
-  { label: "Cream Buns", state: "soon" },
-] as const;
+import { SECTIONS } from "@/lib/sections";
 
 /** Thin cinematic progress rail. Desktop only; decorative for assistive tech. */
 export default function ProgressRail() {
@@ -47,14 +42,12 @@ export default function ProgressRail() {
         />
       </div>
       <ul className="flex flex-col items-end gap-3">
-        {CHAPTERS.map((c, i) => (
+        {SECTIONS.map((section, i) => (
           <li
-            key={c.label}
-            className={`text-[0.55rem] uppercase tracking-[0.28em] ${
-              c.state === "live" ? "text-cream" : "text-cream/25"
-            }`}
+            key={section.id}
+            className="text-[0.55rem] uppercase tracking-[0.28em] text-cream"
           >
-            {String(i + 1).padStart(2, "0")} {c.label}
+            {String(i + 1).padStart(2, "0")} {section.label}
           </li>
         ))}
       </ul>

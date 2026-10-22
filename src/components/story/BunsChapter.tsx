@@ -15,10 +15,11 @@ import { BEATS, TIMELINE, bell, smoothstep } from "@/lib/bunChoreography";
  * Held for the moment the stage's chunk is in flight, and while the chapter is
  * still out of view.
  *
- * It is deliberately empty of product. The bread chapter's poster is its still
- * because the still *is* the loaf; here the opening frame is a bun in the dark,
- * and no supplied photograph of a single bun exists. Showing the eight-pack at
- * p = 0 would be the wrong product in the hero slot, so this is just the light.
+ * Deliberately empty of product. There is no supplied photograph of a single
+ * bun, and the eight-pack would be the wrong product in the opening slot, so
+ * this is only the light — the same warm glow the stage itself opens in. The
+ * pack still appears the moment WebGL fails, which is the case where showing a
+ * photograph actually matters.
  */
 function StagePoster() {
   return (
@@ -39,8 +40,8 @@ export default function BunsChapter() {
   const beatRefs = useRef<(HTMLDivElement | null)[]>([]);
   const packRef = useRef<HTMLDivElement>(null);
   const packShadowRef = useRef<HTMLDivElement>(null);
-  const veilRef = useRef<HTMLDivElement>(null);
   const packCopyRef = useRef<HTMLDivElement>(null);
+  const veilRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef(0);
   const reduced = useReducedMotion();
   const [motionFailed, setMotionFailed] = useState(false);
@@ -118,6 +119,11 @@ export default function BunsChapter() {
         paint(beatEls[i], { opacity: vis, translateY: (1 - vis) * 24 });
       }
 
+      // A short dissolve in from the bread chapter's bright pack. It is over in
+      // 3.5% of the section — a cut, not a dark opening — and the bun beneath it
+      // is already lit, so nothing is hidden behind it.
+      paint(veilEl, { opacity: 0.78 * (1 - smoothstep(0, 0.035, p)) });
+
       const packIn = smoothstep(TIMELINE.packIn, TIMELINE.packInEnd, p);
       paint(packEl, {
         opacity: packIn,
@@ -130,11 +136,6 @@ export default function BunsChapter() {
         scaleX: 0.72 + packIn * 0.28,
         centreX: true,
       });
-
-      // The bread chapter ends on a bright sealed pack; this one opens on a bun
-      // in near-darkness. Without a beat of black the cut between them reads as
-      // a fault, so the frame fades up from ink over the first few percent.
-      paint(veilEl, { opacity: 0.92 * (1 - smoothstep(0, 0.045, p)) });
 
       const copyIn = smoothstep(TIMELINE.packCopy, TIMELINE.packCopyEnd, p);
       paint(packCopyEl, { opacity: copyIn, translateY: (1 - copyIn) * 20 });
@@ -296,14 +297,15 @@ export default function BunsChapter() {
       id="buns"
       ref={sectionRef}
       aria-labelledby="buns-heading"
-      className="relative h-[480svh]"
+      className="relative h-[380svh] sm:h-[400svh]"
     >
       <div className="sticky top-0 h-[100svh] w-full overflow-hidden">
         {/* atmosphere — the same warm oven light the bread chapter opens on */}
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(88%_68%_at_50%_40%,#2c1a0d_0%,#170e07_56%,#0c0703_100%)]" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-ink to-transparent" />
-        {/* and the hand-off into the cream buns section, with no hard edge */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent to-ink/80" />
+        {/* Hand-off: the pack stays lit while the next chapter rises into the
+            bottom of the frame, so the join is a crossfade rather than a gap. */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-b from-transparent to-ink/70" />
 
         <div className="absolute inset-0">
           {stageWanted ? (
@@ -333,7 +335,7 @@ export default function BunsChapter() {
           )}
         </div>
 
-        {/* opening fade, so the cut from the bread chapter is a dissolve */}
+        {/* hand-off dissolve from the previous chapter */}
         <div
           ref={veilRef}
           aria-hidden="true"

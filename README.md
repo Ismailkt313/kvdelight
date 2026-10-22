@@ -1,8 +1,9 @@
 # KV Delight — scroll-controlled product film
 
-Foundation + **bread chapter, rebuilt as a slice film** + **chapter two, the
-soft bun**. Cream buns are still a placeholder and are intentionally not built
-yet.
+**Three chapters in one scroll film**: the bread loaf cut and packed, the soft bun
+pressed, split and packed, and the cream bun opened, piped, closed and packed.
+One transparent chapter header, one logo on screen at a time, and no section that
+scrolls without telling you something.
 
 ```
 Next.js 15 (App Router) · React 19 · TypeScript · Tailwind v4 · GSAP ScrollTrigger · three.js
@@ -24,22 +25,26 @@ Nothing is fetched from a third party at build time or at runtime.
 
 | Path | Purpose |
 |---|---|
-| `src/app/page.tsx` | Page composition: hero, bread chapter, next-chapter placeholders, footer. |
+| `src/app/page.tsx` | Page composition: hero, the three chapters, footer. |
 | `src/components/site/Hero.tsx` | The opening act: crest, wordmark, headline, one whole loaf — before any of the film runs. |
 | `src/components/site/BrandMark.tsx` | The supplied mark on a cream oval, at one ratio, from one asset. |
-| `src/components/story/BreadChapter.tsx` | The chapter's DOM and scroll driver: five caption beats, the packaging hand-off, reduced-motion document. |
+| `src/components/story/BreadChapter.tsx` | Chapter one's DOM and scroll driver: five caption beats, the packaging hand-off, reduced-motion document. |
 | `src/components/three/LoafStage.tsx` | three.js stage: lighting, environment, slice meshes, knife, camera, render loop. |
 | `src/components/story/BunsChapter.tsx` | Chapter two's DOM and scroll driver: four caption beats plus the sealed pack, reduced-motion document. |
 | `src/components/three/BunStage.tsx` | The bun's three.js stage: lights, crust/crumb materials, press and split transforms, camera, on-demand render loop. |
 | `src/lib/bun.ts` | **Pre-separated bun halves**: two closed solids, each with a crust shell and a crumb cut face. No runtime cutting. |
 | `src/lib/bunChoreography.ts` | Bun timings, press/split maths, camera framing and the screen-space guarantee that keeps the bun off the captions. |
+| `src/components/story/CreamChapter.tsx` | Chapter three's DOM and scroll driver: four caption beats, the four-pack hand-off, reduced-motion document. |
+| `src/components/three/CreamStage.tsx` | The cream bun's three.js stage: shell halves, piped cream rings, steel nozzle and stream, camera, on-demand render loop. |
+| `src/lib/creamChoreography.ts` | Cream timings, the open/fill/close schedule, the nozzle's ride, camera framing solved against the real projection. |
+| `src/lib/sections.ts` | The chapter list — one source of truth for the ids in the page and the labels in the header. |
 | `src/lib/slices.ts` | **Sliced loaf geometry**: ten closed slabs, each with a crust shell, crumb cut faces and a crust rim. |
 | `src/lib/knife.ts` | Serrated bread knife, built from geometry (extruded profile + handle + rivets). |
 | `src/lib/breadTextures.ts` | Canvas-generated crumb colour/bump maps and blade grain. No image files. |
 | `src/lib/choreography.ts` | Scene timings, caption windows, knife + seam schedules. Shared by DOM and WebGL. |
 | `src/lib/sliceLayout.ts` | Slice transforms, arc fan, yaw, camera framing, caption clearance. Pure maths. |
 | `src/lib/loaf.ts` | The original whole-loaf geometry, its `fbm` noise (reused by the slices) and the crust material. |
-| `src/components/site/Header.tsx` | The compact sticky masthead. Hidden at the top of the page; revealed when the hero's own lockup leaves the screen. |
+| `src/components/site/Header.tsx` | The chapter bar: transparent overlay, three direct links, active-section mark. Hidden at the top of the page; revealed when the hero's own lockup leaves the screen. |
 | `src/components/site/ProgressRail.tsx` | Numbered progress rail, wide screens only. |
 | `public/assets/hero/` | Two **derived** atmosphere plates cut from `bread-hero-scene`: the kitchen window and the flour-dusted table. |
 | `public/assets/` | Supplied assets only — see `public/assets/CREDITS.md`. |
@@ -87,7 +92,7 @@ transparent art (original file untouched).
 Copy order on a phone is deliberate: branding → headline → support → bread. The
 loaf never sits under a line of type, at any width.
 
-## The bread chapter (`h-[520svh]`, one pinned stage)
+## The bread chapter (`h-[460svh]`, one pinned stage)
 
 Section progress `p` is written by ScrollTrigger into a ref and read by the
 render loop, so GSAP drives the DOM while three.js stays on `requestAnimationFrame`.
@@ -178,6 +183,113 @@ cut faces get a different material without a second draw object.
 >   that can throw.
 > - The spread does **not** do a full 360°: a long loaf pointed at the camera
 >   collapses into a tunnel. It sweeps 40° to a three-quarter instead.
+
+## The chapter bar
+
+Three chapters, three links, no hamburger — on every screen size.
+
+```
+BREAD      SOFT BUNS      CREAM BUNS
+```
+
+At 375 px the three labels plus the crest measure ~315 px against 375 px of
+viewport, so the direct links fit without a second row; below that (320 px) they
+still fit, and the type steps down rather than wrapping. Nothing is hidden behind
+a button, because a visitor on a phone should not need two taps to learn what the
+page contains.
+
+The bar itself is not a bar. There is no plate, no border and no background
+colour: an ink gradient behind the type fades to nothing by 112 px, so the header
+reads as part of the frame. It is `inert` and off-screen at the top of the page,
+fades in when the hero's own lockup (`#hero-brand`) leaves the viewport, and fades
+back out if you scroll home — which is what keeps exactly one logo on screen at a
+time.
+
+The active chapter is decided by an `IntersectionObserver` whose root is inset to
+the middle third of the viewport: the answer is "the section crossing the reading
+line", not "the first section that is technically on screen". Anchors are plain
+`href="#id"` links over `scroll-behavior: smooth`, so the jump still fires the
+scroll events ScrollTrigger's scrub depends on — the chapter's own film plays
+through the jump instead of skipping it.
+
+## Chapter two and chapter three
+
+Both follow chapter one's contract, and both were built by it:
+
+| | chapter two — soft buns | chapter three — cream buns |
+|---|---|---|
+| section | `#buns`, `h-[380svh] sm:h-[400svh]` | `#cream-buns`, `h-[360svh] sm:h-[380svh]` |
+| product | one bun, pressed, split, closed | one bun, opened, piped, closed |
+| geometry | `lib/bun.ts` halves | the same halves, plus cream and a nozzle |
+| packaging | supplied eight-pack | supplied four-pack |
+| fallback | the eight-pack still | the four-pack still |
+| choreography | `lib/bunChoreography.ts` | `lib/creamChoreography.ts` |
+
+The cream bun is not a new product invented for the page: the shell is chapter
+two's bun, the cream is a stack of piped rings, and the pack is the brand's own
+four-pack photograph. The nozzle is a half-metal cylinder group, because a fully
+metallic material with no environment map renders black — a deliberate trade of
+physically-correct steel for something that reads as steel on a phone at one
+material's cost.
+
+The cream camera solves its framing against the real projection rather than
+estimating it: distance is fitted to both axes (a phone limits a round product by
+its width, not its height), the aim point is bisected until the product's centre
+lands in the band above the caption strip, and if the content is still too tall
+for the band the camera gives ground instead of clipping the nozzle. Run
+`npx tsx` against `creamChoreography` to print the projected rectangle at any
+progress and aspect; that is how the caption clearance was checked without a
+browser.
+
+### Chapter three's scenes
+
+| `p` | scene | what happens |
+|---|---|---|
+| 0.00 → 0.14 | **A · The bake** | One closed cream bun, lit, barely turning. |
+| 0.14 → 0.31 | **B · The opening** | The top half lifts on its seam and hinges back. |
+| 0.30 → 0.58 | **C · The pipe** | A nozzle descends, rides up with the fill and lays cream in three piped ridges. |
+| 0.58 → 0.76 | **D · Closed** | The halves meet; the fill compresses and a little cream shows at the seam. |
+| 0.76 → 0.86 | **E · The turn** | One slow turn to the finished bun, camera pulling back. |
+| 0.86 → 1.00 | **F · The pack** | The supplied four-pack takes the frame; its caption arrives last. |
+
+Two bugs in it were found by rendering the geometry, not by reading the code:
+
+1. **The cream was piped inside a closed solid.** The first version stacked the
+   rings from y = 0.1, below the bun's cut plane at 0.36 — and because the bottom
+   half's cut face is an opaque crumb disc, the fill was literally in a box. It
+   never appeared on screen. The fill now starts on the cut face.
+2. **The cream mound reached through the crown.** A hemisphere of radius 0.66 is
+   0.66 tall before it is squashed; scaling it by `filled` alone put its apex
+   above the bun's 0.88-high crown, so the closed bun wore a white cap. The
+   vertical scale is now `filled × (YMAX / R)`.
+
+Both were invisible in the type checker, in the build and in the SSR markup. They
+were visible in a 40-line software rasteriser (z-buffer, the real geometry, the
+real camera and the stage's light directions) — that is the closest thing to a
+screenshot this sandbox allows.
+
+The crust map is generated once per page and shared by all three stages
+(`getCrustTexture` in `lib/loaf.ts`, keyed by size) rather than three times.
+
+### Blank space, root causes
+
+The empty stretches in the earlier build had four distinct causes, and all four
+were structural rather than cosmetic:
+
+1. **Fixed section heights with dead progress bands.** `#bread` was `520svh` with
+   a hold-and-regroup tail that had no caption and little motion, and `#buns` was
+   `480svh` whose first fifth was a black veil over a bun lit at 0.22. Heights are
+   now `460svh` / `380svh` / `360svh` — shorter, but still 3.6, 2.8 and 2.6
+   screens of scroll, so no stage lost its distance to tell its story.
+2. **A poster frame standing in for a product.** The buns chapter's opening veil
+   is now 3.5% of the section instead of 4.5% of a dark screen, and the bun's key
+   light starts at 0.62 instead of 0.22: the frame is never empty, only dim.
+3. **A placeholder between products.** The "Next in the film — not yet built"
+   block between the buns and the footer is gone; chapter three is the block.
+4. **Hand-offs with no overlap.** Each chapter now dissolves in from the previous
+   one's pack over its first 3.5%, and the hero's loaf fades out as the hero
+   leaves rather than staying lit underneath the bread chapter's stage — so there
+   are never two loaves in one viewport.
 
 ## Device safety and the mobile tier
 
@@ -287,9 +399,24 @@ Remove the panel (and this section) once the device is confirmed healthy.
    retouched to match.
 6. The five coffee-website style screenshots are still missing
    (`public/assets/style/`), and the `style/` directory does not exist yet.
-7. Cream buns are an untouched placeholder, by instruction. Soft buns are built;
-   its one honest compromise is that the "cut" is two closed solids modelled to
-   meet, not a mesh severed at runtime — see `src/lib/bun.ts`.
+7. **Every "cut" is two closed solids modelled to meet, not a mesh severed at
+   runtime** — the loaf's ten slabs (`lib/slices.ts`), the soft bun's halves and
+   the cream bun's halves (`lib/bun.ts`) are all pre-separated geometry. Nothing
+   is sliced at run time, and the page says "opened along its own seam" rather
+   than implying otherwise.
+8. **Chapter three is verified by build, projection maths and SSR markup, not on
+   a screen.** There is no browser or GPU in the sandbox: the framing guarantee
+   comes from running `creamChoreography`'s projection at 375×812, 375×667,
+   414×896, 768×1024 and 1440×900, and the DOM comes from the served HTML. What
+   is not verified is how the piped cream *looks* in motion — that needs a phone.
+9. **Three WebGL stages** (loaf, bun, cream) each keep a context once they have
+   been approached; each idles its render loop when off-screen, and the low tier
+   drops their textures to 128² and removes antialiasing, but the contexts are not
+   torn down and rebuilt. On a very old device that is the first thing to reclaim
+   if memory becomes a problem.
+10. The cream bun's nozzle is deliberately semi-metallic (0.45) and lit by a
+    dedicated light: a fully metallic material without an environment map renders
+    black. It reads as steel; it is not a physically exact steel.
 
 ### How chapter two was verified without a GPU
 

@@ -11,7 +11,7 @@ import {
   viewFor,
 } from "@/lib/bunChoreography";
 import { createBunGeometries, createBunMaterials } from "@/lib/bun";
-import { createCrustTexture, createShadowTexture } from "@/lib/loaf";
+import { createShadowTexture, getCrustTexture } from "@/lib/loaf";
 import { createCrumbBump, createCrumbTexture } from "@/lib/breadTextures";
 import { smoothstep } from "@/lib/choreography";
 import {
@@ -204,16 +204,14 @@ function createBunScene({
     track(() => geometries.bottom.dispose());
 
     const maxTex = caps.maxTextureSize;
-    const crustTex = createCrustTexture(
-      clampTextureSize(settings.crustTexture, maxTex),
-    );
+    // Shared with the other two chapters, so the bake is generated once.
+    const crustTex = getCrustTexture(clampTextureSize(settings.crustTexture, maxTex));
     const crumbTex = createCrumbTexture(
       clampTextureSize(settings.crumbTexture, maxTex),
     );
     const crumbBump = createCrumbBump(
       clampTextureSize(settings.crumbTexture, maxTex),
     );
-    if (crustTex) track(() => crustTex.dispose());
     if (crumbTex) track(() => crumbTex.dispose());
     if (crumbBump) track(() => crumbBump.dispose());
     note(
@@ -346,8 +344,15 @@ function createBunScene({
       camera.position.set(0, view.camY, view.camZ);
       camera.lookAt(0, view.lookY, 0);
 
-      /* the bun arrives out of the dark, not by fading in */
-      const light = 0.22 + 0.78 * smoothstep(0, TIMELINE.revealEnd, p);
+      /*
+       * The bun arrives already lit, and warms from there.
+       *
+       * It used to start at 0.22 and climb, which — with the chapter's opening
+       * black veil — meant the first fifth of the section was a dark, empty
+       * screen. The hand-off from the bread pack is a scroll, not a cut, so the
+       * bun has to be visible the moment its panel enters the viewport.
+       */
+      const light = 0.62 + 0.38 * smoothstep(0, TIMELINE.revealEnd, p);
       key.intensity = 3.6 * light;
       rim.intensity = (2.6 + 0.9 * (1 - light)) * light;
       fill.intensity = 0.9 * light;

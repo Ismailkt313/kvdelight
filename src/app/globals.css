@@ -30,6 +30,22 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  /*
+   * Anchor navigation between chapters is a long, multi-screen jump. Native
+   * smooth scrolling keeps the transition readable and — unlike a JS tween — it
+   * still fires the scroll events ScrollTrigger's scrub depends on, so the
+   * chapter's own film plays through the jump instead of skipping it.
+   */
+  scroll-behavior: smooth;
+  /* The header is an overlay, not a bar, so anchors align to the section's own
+     top edge and the sticky panel starts at progress 0. */
+  scroll-padding-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 body {

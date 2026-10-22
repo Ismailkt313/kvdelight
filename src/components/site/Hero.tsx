@@ -1,55 +1,93 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import BrandMark from "@/components/site/BrandMark";
+import { paint } from "@/lib/domPaint";
+import { useReducedMotion } from "@/lib/useReducedMotion";
 
 /**
  * The opening act.
  *
- * The film used to start inside the bread chapter, which meant the first thing a
- * visitor saw was the 3D loaf already filling the frame, with the headline laid
- * over it. This is the branded screen that comes first: the supplied mark, the
- * wordmark, the headline and one whole loaf — and only after this scrolls away
- * does the chapter's cutting film begin.
+ * One screen, one loaf. The scene is the brand's own photography — the kitchen
+ * window and the flour-dusted table cut from `bread-hero-scene` — and the loaf
+ * is the supplied crop sitting *in* that light, masked so it has no rectangle
+ * around it. There is deliberately no second recognisable loaf anywhere: the
+ * only bread in the hero is the one the page is about.
  *
- * The header is hidden here. That is the point: at the top of the page there is
- * exactly **one** logo, the large one. `Header` watches `#hero-brand` and slides
- * the compact bar in only once this lockup has left the top of the screen.
- *
- * Composition rules that the rest of the page inherits:
- *   - the badge is never put on a tile, never recoloured, never glow-treated;
- *   - the headline is never covered by bread. Mobile is built first — copy, then
- *     the photograph beneath it, edge to edge — and the desktop split is the
- *     wide-screen version of the same order;
- *   - everything is sized in `svh` + `clamp()` so it fits the *smallest* viewport
- *     (browser chrome expanded, notch insets) rather than the largest.
- *
- * The background is built from the brand's own photography, not stock: the
- * window light and the flour-dusted table are crops of `bread-hero-scene`, the
- * same still the bread chapter falls back to. That is what ties the backdrop to
- * the product — it is the same room, the same light, the same table.
+ * The hand-off is the part that matters. This section ends where the bread
+ * chapter begins, and the bread chapter opens on a fully lit 3D loaf. If the
+ * photograph were still on screen at that moment there would be two loaves in
+ * one viewport, so the photograph is scrolled off its own way out: as the hero
+ * leaves, the loaf fades and drifts up, gone before the film is framed. The
+ * effect is scroll-linked and written with direct style writes (see
+ * `lib/domPaint`), not a tween, so it cannot drift out of step with the page.
  */
 export default function Hero() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const loafRef = useRef<HTMLDivElement>(null);
+  const reduced = useReducedMotion();
+
+  useEffect(() => {
+    if (reduced) return;
+    const section = sectionRef.current;
+    const loaf = loafRef.current;
+    if (!section || !loaf) return;
+
+    let raf = 0;
+    const write = () => {
+      raf = 0;
+      const rect = section.getBoundingClientRect();
+      const height = rect.height || 1;
+      const travelled = Math.min(1, Math.max(0, -rect.top / height));
+      // Start the exit late enough that the hero is still a hero, and finish it
+      // before the bread chapter's stage is showing anything.
+      const exit = Math.min(1, Math.max(0, (travelled - 0.24) / 0.3));
+      paint(loaf, {
+        opacity: 1 - exit,
+        translateY: -exit * height * 0.05,
+        scale: 1 + exit * 0.05,
+      });
+    };
+
+    const request = () => {
+      if (!raf) raf = requestAnimationFrame(write);
+    };
+
+    write();
+    window.addEventListener("scroll", request, { passive: true });
+    window.addEventListener("resize", request);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", request);
+      window.removeEventListener("resize", request);
+    };
+  }, [reduced]);
+
   return (
     <section
       id="top"
+      ref={sectionRef}
       aria-labelledby="hero-heading"
       className="relative isolate flex min-h-[100svh] flex-col overflow-hidden"
     >
       {/* ------------------------------------------------------- atmosphere -- */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden bg-[radial-gradient(118%_92%_at_74%_26%,#3a2411_0%,#22150a_42%,#140d07_70%,#0a0603_100%)]"
+        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden bg-[radial-gradient(120%_94%_at_72%_24%,#3d2612_0%,#241608_40%,#150d07_68%,#0a0603_100%)]"
       >
         {/* Kitchen window, upper left: the light the loaf is photographed in. */}
         <img
           src="/assets/hero/window-light.webp"
           alt=""
           width={620}
-          height={948}
+          height={1447}
           draggable={false}
           decoding="async"
           fetchPriority="high"
           className="hero-window"
         />
-        {/* The table itself along the bottom edge. */}
+        {/* The table itself, along the bottom edge — the same board the loaf
+            stands on, so the product and the ground share one photograph. */}
         <img
           src="/assets/hero/table-band.webp"
           alt=""
@@ -59,121 +97,120 @@ export default function Hero() {
           decoding="async"
           className="hero-table"
         />
-        {/* Warm pool behind the product — the same gold as the crust. */}
-        <div className="absolute inset-0 bg-[radial-gradient(52%_46%_at_74%_44%,rgba(230,180,92,0.2),transparent_72%)]" />
-        {/* The brand red, used as light rather than as ink: at 3.7:1 on ink it is
-            unreadable as text, but as a low warm glow it ties the hero to the badge. */}
-        <div className="absolute inset-0 bg-[radial-gradient(64%_46%_at_8%_96%,rgba(157,20,24,0.2),transparent_74%)]" />
-        {/* Scrims. The top one protects the crest (and the header, once it
-            arrives) from the window light; the left one keeps the headline off
-            the brightest part of the table on wide screens. */}
-        <div className="absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-ink/85 via-ink/45 to-transparent sm:h-72" />
-        <div className="absolute inset-0 hidden bg-[linear-gradient(100deg,rgba(10,6,3,0.8)_0%,rgba(10,6,3,0.42)_36%,transparent_64%)] lg:block" />
-        {/* Ink rising from the bottom, so the hero melts into the film. */}
-        <div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-ink via-ink/75 to-transparent" />
+        <div className="absolute inset-0 bg-[radial-gradient(50%_44%_at_66%_52%,rgba(230,180,92,0.22),transparent_70%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(62%_44%_at_6%_98%,rgba(157,20,24,0.18),transparent_74%)]" />
+        {/* Scrims: the top protects the crest (and the header, once it arrives),
+            the left keeps the headline off the brightest table on wide screens. */}
+        <div className="absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-ink/80 via-ink/40 to-transparent sm:h-64" />
+        <div className="absolute inset-0 hidden bg-[linear-gradient(100deg,rgba(10,6,3,0.82)_0%,rgba(10,6,3,0.4)_36%,transparent_62%)] lg:block" />
+        <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-ink via-ink/70 to-transparent" />
       </div>
 
-      <div className="mx-auto flex w-full max-w-[1500px] flex-1 flex-col justify-center px-5 pb-4 pt-[max(1.1rem,env(safe-area-inset-top))] sm:px-8 sm:pb-8 sm:pt-10 lg:px-10 lg:pb-10 lg:pt-14">
-        <div className="grid items-center gap-6 sm:gap-8 lg:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)] lg:gap-12">
+      <div className="mx-auto flex w-full max-w-[1500px] flex-1 flex-col justify-center px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 sm:pb-6 sm:pt-8 lg:px-10 lg:pb-8 lg:pt-12">
+        <div className="grid items-center gap-5 sm:gap-7 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] lg:gap-10">
           {/* -------------------------------------------------------- copy -- */}
           <div className="order-1 flex flex-col items-center text-center lg:items-start lg:text-left">
-            {/* Brand lockup. `#hero-brand` is the marker the header watches:
-                while this is on screen, the header stays out of the way. */}
+            {/* The hero owns the mark: `#hero-brand` is the marker the header
+                watches, and while it is on screen the header stays away. */}
             <div
               id="hero-brand"
-              className="flex scroll-mt-24 flex-col items-center lg:flex-row lg:items-center lg:gap-4"
+              className="flex scroll-mt-24 flex-col items-center lg:flex-row lg:items-center lg:gap-5"
             >
               <BrandMark
-                className="h-[5.25rem] sm:h-[5.75rem] lg:h-[6rem] [@media(max-height:640px)]:h-[3.6rem]"
+                className="h-[4.6rem] sm:h-[5rem] lg:h-[5.6rem] [@media(max-height:640px)]:h-[3.4rem]"
                 priority
               />
-              <div className="mt-2.5 lg:mt-0">
+              <div className="mt-2 lg:mt-0">
                 <p className="wordmark text-[0.72rem] sm:text-[0.78rem] lg:text-[0.84rem]">
                   KV Delight
                 </p>
-                <p className="tagline mt-2 text-[0.48rem] text-cream/60 sm:text-[0.52rem]">
+                <p className="tagline mt-1.5 text-[0.48rem] text-cream/60 sm:text-[0.52rem]">
                   Sandwich Bread · White Bread
                 </p>
               </div>
             </div>
 
-            <div className="rule-gold mt-5 h-px w-14 sm:mt-6" />
+            <div className="rule-gold mt-4 h-px w-14 sm:mt-5" />
 
-            <p className="eyebrow mt-4 text-gold/85 sm:mt-5">Chapter one — Bread</p>
+            <p className="eyebrow mt-3.5 text-gold/85 sm:mt-4">Chapter one — Bread</p>
 
             <h1
               id="hero-heading"
-              className="display mt-3 text-[clamp(2.3rem,10.4vw,3.5rem)] leading-[0.92] [text-shadow:0_2px_30px_rgba(8,4,1,0.55)] [@media(max-height:640px)]:text-[2rem] lg:mt-4 lg:text-[clamp(3.3rem,4.7vw,5rem)]"
+              className="display mt-2.5 text-[clamp(2.3rem,10.4vw,3.5rem)] leading-[0.92] [text-shadow:0_2px_30px_rgba(8,4,1,0.55)] [@media(max-height:640px)]:text-[2rem] lg:mt-3 lg:text-[clamp(3.2rem,4.6vw,4.9rem)]"
             >
               Every Bite
               <br />
               <em className="not-italic text-gold">Brings Delight</em>
             </h1>
 
-            <p className="tagline mt-4 text-[0.48rem] text-cream/70 sm:mt-5 sm:text-[0.54rem]">
+            <p className="tagline mt-3.5 text-[0.48rem] text-cream/70 sm:mt-4 sm:text-[0.54rem]">
               Softness · Freshness · Happiness
             </p>
 
-            <p className="mt-3 max-w-[34ch] text-[0.85rem] leading-relaxed text-cream-dim sm:mt-4 sm:text-[0.92rem] lg:max-w-[38ch] [@media(max-height:640px)]:hidden">
+            <p className="mt-2.5 max-w-[32ch] text-[0.84rem] leading-relaxed text-cream-dim sm:mt-3 sm:text-[0.9rem] lg:max-w-[36ch] [@media(max-height:640px)]:hidden">
               One loaf, filmed in a single unbroken take — whole crown, knife,
               sealed pack.
             </p>
           </div>
 
           {/* ----------------------------------------------------- product -- */}
-          {/* Second in the column on phones: the headline is fully read before
-              any bread, and the photograph runs edge to edge beneath it. */}
-          <figure className="order-2 relative -mx-5 sm:mx-0 lg:-mr-5">
+          {/* One loaf, centred in the light on phones and holding the right of
+              the frame on wide screens. The mask is elliptical and biased
+              upward, so the photograph's own edges dissolve into the table
+              instead of drawing a rectangle around the bread. */}
+          <div
+            ref={loafRef}
+            className="order-2 relative -mx-6 mt-1 sm:mx-0 sm:mt-2 lg:-mr-6 lg:mt-0"
+            style={{ transformOrigin: "50% 100%" }}
+          >
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-[-4%] bottom-[2%] top-[18%] -z-10 bg-[radial-gradient(closest-side,rgba(201,138,63,0.22),rgba(201,138,63,0)_74%)]"
+              className="pointer-events-none absolute inset-x-[2%] bottom-[6%] top-[16%] -z-10 bg-[radial-gradient(closest-side,rgba(214,150,70,0.26),rgba(214,150,70,0)_76%)]"
             />
-            <img
-              src="/assets/product/bread-hero-loaf-crop.webp"
-              alt="A whole KV Delight sandwich loaf, golden-crusted and dusted with flour, on a wooden board with wheat and a jug of milk."
-              width={941}
-              height={569}
-              // The hero is the first paint the visitor judges the brand by, and
-              // it is above the fold: fetch it early and at high priority.
-              fetchPriority="high"
-              decoding="async"
-              draggable={false}
-              className="loaf-plate mx-auto h-auto w-full max-h-[29svh] object-contain object-center sm:max-h-[32svh] lg:max-h-[58svh]"
-            />
-            {/* Deepens the plate's own edges so the photograph sits *in* the
-                room rather than on top of it. Purely a grade; the asset and
-                its crop are untouched. */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 bg-[radial-gradient(112%_108%_at_52%_48%,transparent_44%,rgba(10,6,3,0.38)_78%,rgba(10,6,3,0.62)_100%)]"
-            />
-            <figcaption className="sr-only">
-              The loaf, before the film begins.
-            </figcaption>
-          </figure>
+            {/* The box carries the aspect ratio and the height cap; the image
+                only ever letterboxes inside it. Sizing the <img> directly with
+                `w-full max-h-…` distorts the loaf the moment a short viewport
+                makes the cap bind — which is exactly what a landscape phone
+                does. */}
+            <div className="relative mx-auto aspect-[941/569] w-full max-h-[40svh] sm:max-h-[42svh] lg:max-h-[62svh]">
+              <img
+                src="/assets/product/bread-hero-loaf-crop.webp"
+                alt="A whole KV Delight sandwich loaf, golden-crusted and dusted with flour, on a wooden board with wheat and a jug of milk."
+                width={941}
+                height={569}
+                fetchPriority="high"
+                decoding="async"
+                draggable={false}
+                className="loaf-plate h-full w-full object-contain object-center"
+              />
+            </div>
+            {/* No extra grade plate over the photograph: the `.loaf-plate`
+                mask already dissolves its edges, and an unmasked radial wash
+                would put a soft rectangle back around the loaf. */}
+            <span className="sr-only">The loaf, before the film begins.</span>
+          </div>
         </div>
       </div>
 
       {/* ------------------------------------------------------- scroll cue -- */}
-      <div className="relative z-10 mx-auto w-full max-w-[1500px] px-5 pb-[max(0.9rem,env(safe-area-inset-bottom))] text-center sm:px-8 lg:px-10 lg:text-left">
+      <div className="relative z-10 mx-auto flex w-full max-w-[1500px] justify-center px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-8 lg:justify-start lg:px-10">
         <a
           href="#bread"
-          className="group inline-flex min-h-[2.75rem] items-center gap-3 lg:min-h-0"
+          className="group inline-flex min-h-[2.75rem] items-center gap-3"
         >
           <span className="eyebrow text-cream/80 transition-colors group-hover:text-gold">
             Scroll to explore
           </span>
           <span
             aria-hidden="true"
-            className="h-px w-10 bg-gradient-to-r from-gold-deep to-transparent transition-colors group-hover:from-gold"
+            className="h-px w-9 bg-gradient-to-r from-gold-deep to-transparent transition-colors group-hover:from-gold"
           />
         </a>
       </div>
 
-      {/* hand-off to the film: no hard seam between the hero and the stage */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent via-ink/55 to-ink"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent via-ink/50 to-ink"
       />
     </section>
   );

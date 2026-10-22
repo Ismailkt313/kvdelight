@@ -269,6 +269,27 @@ export function createCrustTexture(size = 512): THREE.CanvasTexture | null {
   return tex;
 }
 
+/**
+ * The crust map, generated once per page.
+ *
+ * Three stages now use the same bake: the loaf, the soft bun and the cream bun.
+ * The canvas costs a few milliseconds and 512² of GPU texture, so it is built
+ * once and shared — keyed by size, because the low tier asks for a smaller map
+ * than the high tier and the two must not alias. A shared texture is never
+ * disposed per stage: it lives as long as the document, which is exactly as long
+ * as any of the three chapters can need it.
+ */
+const crustCache = new Map<number, THREE.CanvasTexture>();
+
+export function getCrustTexture(size: number): THREE.CanvasTexture | null {
+  const key = Math.max(16, Math.round(size));
+  const cached = crustCache.get(key);
+  if (cached) return cached;
+  const texture = createCrustTexture(key);
+  if (texture) crustCache.set(key, texture);
+  return texture;
+}
+
 /** Soft contact shadow under the loaf (alpha only). Cached like the crust. */
 export function createShadowTexture(size = 256): THREE.CanvasTexture | null {
   const cached = shadowCanvases.get(size);
