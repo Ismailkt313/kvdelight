@@ -139,24 +139,56 @@ body {
   );
 }
 
-/* The hero photograph melts into the ink instead of ending on a hard edge. */
+/*
+ * The hero photograph melts into the ink instead of ending on a hard edge.
+ *
+ * Two masks, because the phone and the desktop show it differently:
+ *
+ *  - On a phone the photograph is full-bleed and covers its row edge to edge, so
+ *    its left and right edges are off-screen and the only edges left to hide are
+ *    top and bottom. One vertical linear gradient fades both at once, and the
+ *    image dissolves into the scene above and the table below with no frame.
+ *  - From 640 px it sits in a box with its own aspect ratio, so all four edges
+ *    are visible and the elliptical mask takes the corners off.
+ */
 .loaf-plate {
-  /* Slightly tighter than before: the hero now has its own photographic
-     backdrop, so the plate has to dissolve into it rather than sit on it. */
-  -webkit-mask-image: radial-gradient(
-    122% 112% at 52% 48%,
-    #000 34%,
-    rgba(0, 0, 0, 0.88) 62%,
-    rgba(0, 0, 0, 0.35) 82%,
-    transparent 94%
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.42) 9%,
+    #000 27%,
+    #000 74%,
+    rgba(0, 0, 0, 0.5) 90%,
+    rgba(0, 0, 0, 0) 100%
   );
-  mask-image: radial-gradient(
-    122% 112% at 52% 48%,
-    #000 34%,
-    rgba(0, 0, 0, 0.88) 62%,
-    rgba(0, 0, 0, 0.35) 82%,
-    transparent 94%
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.42) 9%,
+    #000 27%,
+    #000 74%,
+    rgba(0, 0, 0, 0.5) 90%,
+    rgba(0, 0, 0, 0) 100%
   );
+}
+
+@media (min-width: 640px) {
+  .loaf-plate {
+    -webkit-mask-image: radial-gradient(
+      122% 112% at 52% 48%,
+      #000 34%,
+      rgba(0, 0, 0, 0.88) 62%,
+      rgba(0, 0, 0, 0.35) 82%,
+      transparent 94%
+    );
+    mask-image: radial-gradient(
+      122% 112% at 52% 48%,
+      #000 34%,
+      rgba(0, 0, 0, 0.88) 62%,
+      rgba(0, 0, 0, 0.35) 82%,
+      transparent 94%
+    );
+  }
 }
 
 /* ---------------------------------------------------------- hero plates -- */
@@ -168,11 +200,11 @@ body {
  */
 .hero-window {
   position: absolute;
-  top: -16%;
-  left: -30%;
-  width: min(104vw, 720px);
+  top: -13%;
+  left: -34%;
+  width: min(98vw, 720px);
   height: auto;
-  opacity: 0.5;
+  opacity: 0.44;
   mix-blend-mode: screen;
   filter: saturate(0.9) contrast(1.04);
   user-select: none;
@@ -211,8 +243,8 @@ body {
 .hero-table {
   position: absolute;
   left: 50%;
-  bottom: -1%;
-  width: max(126%, 860px);
+  bottom: -4%;
+  width: max(132%, 860px);
   max-width: none;
   height: auto;
   transform: translateX(-50%);
