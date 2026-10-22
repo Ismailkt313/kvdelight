@@ -49,7 +49,7 @@ function noise3(x: number, y: number, z: number) {
   return (y0 + (y1 - y0) * zf) * 2 - 1;
 }
 
-function fbm(x: number, y: number, z: number, octaves = 3) {
+export function fbm(x: number, y: number, z: number, octaves = 3) {
   let amp = 1;
   let sum = 0;
   let norm = 0;
@@ -70,8 +70,12 @@ const signPow = (v: number, e: number) =>
   Math.sign(v) * Math.pow(Math.abs(v), e);
 
 /**
- * Builds the loaf surface. Local axes: X = length, Y = height, Z = width.
- * Bottom of the loaf sits at y ≈ -height/2.
+ * Builds the whole (unsliced) loaf surface. Local axes: X = length, Y = height,
+ * Z = width. Bottom of the loaf sits at y ≈ -height/2.
+ *
+ * Superseded by the sliced build in `lib/slices.ts`, which reproduces the same
+ * silhouette but as nine separate slabs. Kept because it documents the crust
+ * colouring and is a safe fallback if the slicing pass is ever rolled back.
  */
 export function createLoafGeometry({
   length = 4.5,

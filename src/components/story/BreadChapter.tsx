@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useReducedMotion } from "@/lib/useReducedMotion";
+import { BEATS, TIMELINE, bell, smoothstep } from "@/lib/choreography";
 
 const LoafStage = dynamic(() => import("@/components/three/LoafStage"), {
   ssr: false,
@@ -14,38 +15,6 @@ const LoafStage = dynamic(() => import("@/components/three/LoafStage"), {
     </div>
   ),
 });
-
-const BEATS = [
-  {
-    index: "01",
-    kicker: "Unwrapped",
-    title: "Every Bite\nBrings Delight",
-    body: "One loaf, out of the tin and into the light. Keep scrolling and it will turn for you.",
-    window: [-0.5, 0.215] as const,
-  },
-  {
-    index: "02",
-    kicker: "In the round",
-    title: "Every angle\nis the same story",
-    body: "The bake is the whole subject here — nothing added, nothing hidden.",
-    window: [0.29, 0.5] as const,
-  },
-  {
-    index: "03",
-    kicker: "Hand-off",
-    title: "Then it is\nsealed",
-    body: "The loaf leaves the board and the pack takes its place.",
-    window: [0.58, 0.76] as const,
-  },
-];
-
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-/** 0 → 1 → 0 ramp across a [start, end] progress window. */
-const window_ = (p: number, a: number, b: number, fade = 0.055) => {
-  const inn = clamp01((p - a) / fade);
-  const out = 1 - clamp01((p - (b - fade)) / fade);
-  return Math.max(0, Math.min(inn, out));
-};
 
 export default function BreadChapter() {
   const sectionRef = useRef<HTMLElement>(null);
@@ -85,28 +54,28 @@ export default function BreadChapter() {
     };
 
     const update = (p: number) => {
-      // Captions
+      // Captions — driven by the same windows the geometry uses.
       BEATS.forEach((beat, i) => {
         const [a, b] = beat.window;
-        const vis = window_(p, a, b);
+        const vis = bell(p, a, b);
         setters.opacity[i](vis);
         setters.y[i]((1 - vis) * 26);
       });
 
-      // Packaging hand-off
-      const packIn = clamp01((p - 0.79) / 0.16);
+      // Packaging hand-off: the slices leave, the supplied pack arrives.
+      const packIn = smoothstep(TIMELINE.packIn, TIMELINE.packInEnd, p);
       setters.packOpacity(packIn);
       setters.packY((1 - packIn) * 60);
       setters.packScale(1.07 - packIn * 0.07);
       setters.packShadow(packIn * 0.9);
       setters.packShadowScale(0.7 + packIn * 0.3);
 
-      const copyIn = clamp01((p - 0.87) / 0.1);
+      const copyIn = smoothstep(TIMELINE.packCopy, TIMELINE.packCopyEnd, p);
       setters.copyOpacity(copyIn);
       setters.copyY((1 - copyIn) * 22);
 
       // Opening cue
-      setters.cueOpacity(1 - clamp01(p / 0.05));
+      setters.cueOpacity(1 - smoothstep(0, 0.045, p));
     };
 
     update(0);
@@ -141,27 +110,41 @@ export default function BreadChapter() {
       <section id="bread" aria-labelledby="bread-heading" className="relative">
         <div className="mx-auto max-w-6xl px-5 pb-8 pt-28 sm:px-8 sm:pt-36">
           <p className="eyebrow">Chapter one — Bread</p>
-          <h1 id="bread-heading" className="display mt-4 text-[13vw] leading-[0.9] sm:text-[6.5vw]">
+          <h1
+            id="bread-heading"
+            className="display mt-4 text-[13vw] leading-[0.9] sm:text-[6.5vw]"
+          >
             Every Bite
             <br />
             <em className="not-italic text-gold">Brings Delight</em>
           </h1>
           <p className="mt-6 max-w-xl text-sm leading-relaxed text-cream-dim">
-            One loaf, out of the tin and into the light. The animated film is
-            paused because your device asks for reduced motion — the story is
-            below in full.
+            One loaf, out of the tin and into the light — then sliced, slice by
+            slice. The animated film is paused because your device asks for
+            reduced motion; the story is below in full.
           </p>
         </div>
 
         <div className="mx-auto max-w-6xl px-5 sm:px-8">
-          <div className="overflow-hidden rounded-sm border border-cream/10 bg-ink-soft">
-            <img
-              src="/assets/product/bread-hero-loaf-crop.webp"
-              alt="A freshly baked KV Delight loaf on a wooden board, with flour, wheat and butter around it."
-              className="h-auto w-full object-cover"
-              width={941}
-              height={569}
-            />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="overflow-hidden rounded-sm border border-cream/10 bg-ink-soft">
+              <img
+                src="/assets/product/bread-hero-loaf-crop.webp"
+                alt="A freshly baked KV Delight loaf on a wooden board, with flour, wheat and butter around it."
+                className="h-full w-auto object-cover"
+                width={941}
+                height={569}
+              />
+            </div>
+            <div className="overflow-hidden rounded-sm border border-cream/10 bg-ink-soft">
+              <img
+                src="/assets/product/bread-hero-scene.webp"
+                alt="The same KV Delight loaf in its full table scene, showing the crust and crumb."
+                className="h-full w-full object-cover"
+                width={1536}
+                height={1024}
+              />
+            </div>
           </div>
 
           <ol className="mt-12 space-y-10">
@@ -170,13 +153,19 @@ export default function BreadChapter() {
                 <p className="eyebrow">
                   {b.index} — {b.kicker}
                 </p>
-                <h2 className="display mt-3 whitespace-pre-line text-3xl">{b.title}</h2>
-                <p className="mt-3 max-w-xl text-sm leading-relaxed text-cream-dim">{b.body}</p>
+                <h2 className="display mt-3 whitespace-pre-line text-3xl">
+                  {b.title}
+                </h2>
+                <p className="mt-3 max-w-xl text-sm leading-relaxed text-cream-dim">
+                  {b.body}
+                </p>
               </li>
             ))}
             <li className="border-t border-cream/10 pt-5">
-              <p className="eyebrow">04 — Sealed</p>
-              <h2 className="display mt-3 text-3xl">Sandwich Bread — White Bread</h2>
+              <p className="eyebrow">05 — Sealed</p>
+              <h2 className="display mt-3 text-3xl">
+                Sandwich Bread — White Bread
+              </h2>
               <p className="mt-3 max-w-xl text-sm leading-relaxed text-cream-dim">
                 The fully packaged loaf, exactly as supplied on the pack artwork.
               </p>
@@ -200,16 +189,21 @@ export default function BreadChapter() {
       id="bread"
       ref={sectionRef}
       aria-labelledby="bread-heading"
-      className="relative h-[440svh]"
+      className="relative h-[560svh]"
     >
       <div className="sticky top-0 h-[100svh] w-full overflow-hidden">
         {/* atmosphere */}
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_70%_at_50%_38%,#2a1a0d_0%,#160d06_55%,#0c0703_100%)]" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-ink to-transparent" />
 
-        {/* 3D loaf stage */}
+        {/* the slice film: whole loaf → knife → slices → spread → pack */}
         <div className="absolute inset-0">
-          <LoafStage progressRef={progressRef} active reducedMotion={false} onReady={onReady} />
+          <LoafStage
+            progressRef={progressRef}
+            active
+            reducedMotion={false}
+            onReady={onReady}
+          />
         </div>
 
         {/* floor shadow beneath the pack */}
@@ -235,13 +229,20 @@ export default function BreadChapter() {
 
         {/* chapter title, always readable for assistive tech */}
         <h1 id="bread-heading" className="sr-only">
-          KV Delight bread — from unwrapped loaf to sealed pack
+          KV Delight bread — a whole loaf, sliced, then sealed in its pack
         </h1>
+        <p className="sr-only">
+          The sequence runs in five scenes: a whole unsliced loaf; a serrated
+          bread knife cutting nine cross-cuts; the slices separating one by one,
+          revealing pale crumb inside a golden crust; the slices fanned apart in
+          a slow three-quarter turn; then the slices leaving as the sealed KV
+          Delight Sandwich Bread pack arrives.
+        </p>
 
         {/* captions */}
         <div className="absolute inset-0 z-20 flex items-end pb-[16svh] sm:items-center sm:pb-0">
           <div className="mx-auto w-full max-w-[1500px] px-5 sm:px-10">
-            <div className="relative h-[34svh] w-full max-w-[34rem] sm:h-[38svh]">
+            <div className="relative h-[36svh] w-full max-w-[34rem] sm:h-[40svh]">
               {BEATS.map((beat, i) => (
                 <div
                   key={beat.index}
@@ -271,13 +272,13 @@ export default function BreadChapter() {
           className="pointer-events-none absolute inset-x-0 top-[16svh] z-30 mx-auto max-w-[1500px] px-5 opacity-0 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 sm:px-10 sm:pr-36 lg:pr-52"
         >
           <div className="sm:ml-auto sm:max-w-sm sm:text-right">
-            <p className="eyebrow">04 — Sealed</p>
+            <p className="eyebrow">05 — Sealed</p>
             <p className="display mt-3 text-3xl sm:text-4xl">Sandwich Bread</p>
             <p className="mt-1 text-[0.7rem] uppercase tracking-[0.3em] text-gold">
               White Bread
             </p>
             <p className="mt-4 text-[0.82rem] leading-relaxed text-cream-dim">
-              The same loaf, now in its sealed pack.
+              The same loaf, cut and wrapped — wherever it is going next.
             </p>
           </div>
         </div>

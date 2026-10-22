@@ -5,18 +5,37 @@ import * as THREE from "three";
 import {
   createCrustMaterial,
   createCrustTexture,
-  createLoafGeometry,
   createShadowTexture,
 } from "@/lib/loaf";
+import { createSliceGeometries, LOAF } from "@/lib/slices";
+import { createKnife } from "@/lib/knife";
+import {
+  createBladeTexture,
+  createCrumbBump,
+  createCrumbTexture,
+} from "@/lib/breadTextures";
+import { smoothstep } from "@/lib/choreography";
+import {
+  BASE_Y,
+  baseView,
+  cameraFor,
+  captionShift,
+  knifeTransform,
+  layoutSlices,
+  frameWidthFraction,
+  yawAt,
+} from "@/lib/sliceLayout";
 
 type LoafStageProps = {
   /** Scroll progress of the bread chapter, 0 → 1. Mutated by ScrollTrigger. */
   progressRef: React.MutableRefObject<number>;
-  /** True when the chapter is pinned/visible — pauses the render loop otherwise. */
+  /** True when the chapter is on screen — otherwise the loop is skipped. */
   active: boolean;
   reducedMotion?: boolean;
+  quality?: "high" | "low";
   onReady?: () => void;
 };
+
 
 /** Warm studio environment built from a canvas gradient — no HDR download. */
 function buildEnvironment(renderer: THREE.WebGLRenderer) {
@@ -43,17 +62,26 @@ function buildEnvironment(renderer: THREE.WebGLRenderer) {
   return env;
 }
 
-const easeInOut = (t: number) => t * t * (3 - 2 * t);
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-
+/**
+ * Scene A → E, read from chapter progress. Camera framing:
+ *   - the yaw turn is slow while cutting (the blade holds its alignment) and
+ *     opens into a full 360° showcase of the fanned slices in scene D;
+ *   - the fit scale is recomputed from the arrangement's real width, so the
+ *     spread always stays inside the frame on any aspect ratio.
+ */
 export default function LoafStage({
   progressRef,
   active,
   reducedMotion = false,
+  quality = "high",
   onReady,
 }: LoafStageProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+
+  // Read through refs so a prop change never rebuilds the whole scene.
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -62,7 +90,7 @@ export default function LoafStage({
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
-        antialias: true,
+        antialias: quality === "high",
         alpha: true,
         powerPreference: "high-performance",
       });
@@ -71,7 +99,11 @@ export default function LoafStage({
       return;
     }
 
-    const dpr = Math.min(window.devicePixelRatio || 1, window.innerWidth < 768 ? 1.5 : 1.75);
+    const coarse = quality === "low";
+    const dpr = Math.min(
+      window.devicePixelRatio || 1,
+      coarse ? 1.4 : window.innerWidth < 768 ? 1.5 : 1.75,
+    );
     renderer.setPixelRatio(dpr);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -92,11 +124,9 @@ export default function LoafStage({
       0.1,
       100,
     );
+    const FOV = 34;
 
-    // Framing constants recomputed on resize so the loaf always fits the stage.
-    const view = { camZ: 8.6, camY: 1.15, lookY: 0.02, fov: 34, fit: 1 };
-    camera.position.set(0, view.camY, view.camZ);
-    camera.lookAt(0, view.lookY, 0);
+    let view = baseView(1.5);
 
     /* ------------------------------------------------------------ lights -- */
     const key = new THREE.DirectionalLight("#ffe1b4", 3.4);
@@ -111,11 +141,22 @@ export default function LoafStage({
     bounce.position.set(1.5, -3.5, 3.0);
     scene.add(bounce);
 
-    // Camera-side fill: keeps the face that turns toward the viewer from
-    // collapsing into silhouette during the 360° turn.
+    // Camera-side fill: keeps the faces that turn toward the viewer from
+    // collapsing into silhouette — and lights the cut crumb faces.
     const frontFill = new THREE.DirectionalLight("#ffe6c6", 0.85);
     frontFill.position.set(0.6, 1.6, 6.5);
     scene.add(frontFill);
+
+    // The crumb is the subject in scenes C and D, and those faces only exist
+    // once the loaf is open — so it gets its own soft pair, camera side and
+    // opposite, that keeps them lit through the whole 360° showcase.
+    const crumbKey = new THREE.DirectionalLight("#fff2dc", 1.15);
+    crumbKey.position.set(0.3, 1.1, 6.8);
+    scene.add(crumbKey);
+
+    const crumbBack = new THREE.DirectionalLight("#ffe0b4", 0.55);
+    crumbBack.position.set(-0.6, 0.7, -6.2);
+    scene.add(crumbBack);
 
     const ambient = new THREE.AmbientLight("#ffe9cf", 0.28);
     scene.add(ambient);
@@ -123,85 +164,160 @@ export default function LoafStage({
     const fill = new THREE.HemisphereLight("#fff1da", "#22140a", 0.5);
     scene.add(fill);
 
-    /* ------------------------------------------------------------- loaf --- */
-    const grain = createCrustTexture(512);
-    const geometry = createLoafGeometry();
-    const material = createCrustMaterial(grain);
-    const loaf = new THREE.Mesh(geometry, material);
+    /* ------------------------------------------------------------- world --- */
+    // `world` carries the turn + fit scale; the loaf and the knife live inside
+    // it, so the blade always stays in the seam plane as the loaf turns.
+    const world = new THREE.Group();
+    scene.add(world);
+
     const loafGroup = new THREE.Group();
-    loafGroup.add(loaf);
-    scene.add(loafGroup);
+    loafGroup.position.y = BASE_Y;
+    world.add(loafGroup);
 
-    /* ------------------------------------------------- contact shadow ----- */
-    const shadowTex = createShadowTexture();
-    const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.6, 2.6),
-      new THREE.MeshBasicMaterial({
-        map: shadowTex,
-        transparent: true,
-        opacity: 0.75,
-        depthWrite: false,
-      }),
+    /* -------------------------------------------------------- slice meshes -- */
+    const { slices } = createSliceGeometries(
+      coarse
+        ? { ringSegments: 20, arcSteps: 6 }
+        : { ringSegments: 30, arcSteps: 9 },
     );
-    geometry.computeBoundingBox();
-    const floorY = (geometry.boundingBox?.min.y ?? -0.9) - 0.015;
+
+    const crustTex = createCrustTexture(coarse ? 256 : 512);
+    const crustMat = createCrustMaterial(crustTex);
+    // Opaque for the whole film; transparency is switched on only for the
+    // hand-off fade, so the slabs sort crisply while they are being studied.
+    crustMat.transparent = false;
+    crustMat.needsUpdate = true;
+
+    const crumbTex = createCrumbTexture(coarse ? 256 : 512);
+    const crumbBump = createCrumbBump(coarse ? 256 : 512);
+    crumbTex.repeat.set(1, 1);
+    const crumbMat = new THREE.MeshPhysicalMaterial({
+      vertexColors: true,
+      map: crumbTex,
+      bumpMap: crumbBump,
+      bumpScale: 0.018,
+      roughness: 0.84,
+      metalness: 0,
+      sheen: 0.3,
+      sheenColor: new THREE.Color("#fff1d8"),
+      sheenRoughness: 0.9,
+      envMapIntensity: 0.4,
+      transparent: false,
+    });
+
+    const meshes: THREE.Mesh[] = slices.map((slice) => {
+      const mesh = new THREE.Mesh(slice.geometry, [crustMat, crumbMat]);
+      loafGroup.add(mesh);
+      return mesh;
+    });
+
+    /* -------------------------------------------------------------- knife -- */
+    const bladeTex = createBladeTexture(256);
+    const knife = createKnife(bladeTex);
+    const knifePivot = new THREE.Group();
+    knifePivot.add(knife.group);
+    knife.group.rotation.y = -Math.PI / 2; // length runs along world Z
+    knifePivot.visible = false;
+    world.add(knifePivot);
+
+    /* ------------------------------------------------------ contact shadow -- */
+    const shadowTex = createShadowTexture();
+    const shadowMat = new THREE.MeshBasicMaterial({
+      map: shadowTex,
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false,
+    });
+    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shadowMat);
     shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = floorY;
-    shadow.position.y = floorY;
-    scene.add(shadow);
+    shadow.position.y = BASE_Y - 0.008;
+    shadow.scale.set(7.4, 3.1, 1);
+    world.add(shadow);
 
-    // Keep the shadow locked just under the loaf as it drifts.
-    const shadowBaseY = floorY;
+    let spreadScale = 1;
+    let fit = 1;
 
-    /* ------------------------------------------------------ choreography -- */
-    // progressRef is section-scoped: 0 = hero, 1 = hand-off to packaging.
-    const pose = { yaw: -0.5, pitch: 0.06, roll: -0.03 };
-
-    const applyPose = (p: number) => {
-      // Rotation: one genuine 360° turn spread over the midsection of the pin,
-      // with an ease so the loaf decelerates as it hands off to the pack shot.
-      const spinStart = 0.16;
-      const spinEnd = 0.74;
-      const spinT = clamp01((p - spinStart) / (spinEnd - spinStart));
-      const spin = easeInOut(spinT) * Math.PI * 2;
-
-      pose.yaw = -0.5 + spin;
-      pose.pitch = 0.17 + Math.sin(p * Math.PI) * 0.05;
-      pose.roll = -0.02 + Math.sin(p * Math.PI * 1.3) * 0.03;
-
-      loafGroup.rotation.set(pose.pitch, pose.yaw, pose.roll);
-
-      // Scale: settle in, breathe up, then hand off.
-      const introScale = 1 + (1 - clamp01(p / 0.16)) * 0.06;
-      const outroScale = 1 - clamp01((p - 0.66) / 0.2) * 0.14;
-      const s = introScale * outroScale * view.fit;
-      loafGroup.scale.setScalar(s);
-
-      // Vertical drift + camera choreography.
-      loafGroup.position.y = 0.06 - clamp01(p / 0.5) * 0.08;
-      loafGroup.position.x = Math.sin(p * Math.PI * 0.9) * 0.18;
-
-      camera.position.z =
-        view.camZ -
-        Math.sin(clamp01(p / 0.8) * Math.PI) * 0.9 +
-        clamp01((p - 0.8) / 0.2) * 1.4;
-      camera.position.y = view.camY - Math.sin(p * Math.PI) * 0.12;
-      camera.lookAt(0, view.lookY, 0);
-
-      // Shadow reacts to the lift so the loaf never looks pasted on.
-      shadow.position.y = shadowBaseY + loafGroup.position.y * 0.35;
-      shadow.scale.setScalar(
-        (1 + Math.abs(Math.sin(p * Math.PI)) * 0.06) * view.fit,
-      );
-      (shadow.material as THREE.MeshBasicMaterial).opacity =
-        0.75 - Math.abs(Math.sin(p * Math.PI)) * 0.12;
-
-      // Fade the loaf out at the very end, just before the packaging arrives.
-      material.opacity = 1 - clamp01((p - 0.68) / 0.12);
+    /** Writes the shared layout onto the meshes; returns the arrangement width. */
+    const applySlices = (p: number) => {
+      const layout = layoutSlices(p, spreadScale);
+      for (let i = 0; i < meshes.length; i++) {
+        const t = layout.transforms[i];
+        meshes[i].position.set(t.x, t.y, t.z);
+        meshes[i].rotation.set(t.rx, t.ry, t.rz);
+      }
+      return layout.width;
     };
 
-    /* --------------------------------------------------------- parallax --- */
-    const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
+    /* -------------------------------------------------------- choreography -- */
+    const applyKnife = (p: number) => {
+      const k = knifeTransform(p);
+      knifePivot.visible = k.visible;
+      if (!k.visible) return;
+      knifePivot.position.set(k.x, k.y, k.z);
+      // Spine tips forward into the cut; the edge stays in the seam plane.
+      knifePivot.rotation.set(k.rx, 0, 0.03 * (k.rx / -0.16 || 0));
+    };
+
+    const setFade = (t: number) => {
+      const opaque = t <= 0.001;
+      if (opaque === crustMat.transparent) {
+        crustMat.transparent = !opaque;
+        crustMat.needsUpdate = true;
+        crumbMat.transparent = !opaque;
+        crumbMat.needsUpdate = true;
+        knife.bladeMaterial.transparent = !opaque;
+        knife.bladeMaterial.needsUpdate = true;
+        knife.handleMaterial.transparent = !opaque;
+        knife.handleMaterial.needsUpdate = true;
+      }
+      crustMat.opacity = 1 - t;
+      crumbMat.opacity = 1 - t;
+      knife.bladeMaterial.opacity = 1 - t;
+      knife.handleMaterial.opacity = 1 - t;
+    };
+
+    const update = (p: number) => {
+      const width = applySlices(p);
+      world.rotation.y = yawAt(p);
+
+      /* camera: a slow push through the cut, then up and over the fan */
+      const cam = cameraFor(p, camera.aspect);
+      camera.position.z = cam.camZ;
+      camera.position.y = cam.camY;
+      camera.lookAt(0, cam.lookY, 0);
+
+      /* fit the arrangement, whatever its aspect */
+      const dist = Math.max(2, camera.position.z);
+      const halfH = Math.tan((FOV * Math.PI) / 180 / 2) * dist;
+      const halfW = halfH * camera.aspect;
+      const neededW = width / 2;
+      const neededH = LOAF.height * 0.62 + 0.55;
+      fit = Math.min(
+        1.02,
+        (halfW * frameWidthFraction(p, camera.aspect)) / Math.max(0.001, neededW),
+        (halfH * 0.86) / neededH,
+      );
+      if (!Number.isFinite(fit) || fit <= 0) fit = 1;
+      world.scale.setScalar(fit);
+
+      // Sit clear of the left-hand caption on desktop. Scaled by the visible
+      // half-width, and faded in as the loaf opens up.
+      world.position.x = captionShift(p, camera.aspect) * halfW;
+
+      /* hand-off: the bread leaves, the pack arrives */
+      const fade = smoothstep(0.845, 0.94, p);
+      setFade(fade);
+      loafGroup.position.y = BASE_Y + fade * 0.22;
+      world.rotation.y += fade * 0.16;
+
+      shadowMat.opacity = (1 - fade) * 0.8;
+      shadow.scale.x = width + 1.4;
+
+      applyKnife(p);
+    };
+
+    /* ---------------------------------------------------------- parallax -- */
+    const pointer = { x: 0, y: 0, tx: 0, ty: 0, ox: 0, oy: 0 };
     const onPointerMove = (e: PointerEvent) => {
       if (reducedMotion) return;
       const r = host.getBoundingClientRect();
@@ -218,27 +334,12 @@ export default function LoafStage({
       renderer.setSize(w, h, false);
       const aspect = w / h;
       camera.aspect = aspect;
-      camera.fov = 34;
+      camera.fov = FOV;
 
-      if (aspect < 0.8) {
-        // Portrait: shrink + pull back so the whole loaf fits, and lift it into
-        // the upper half so the caption has a clean field underneath.
-        view.camZ = 12.6;
-        view.camY = 1.0;
-        view.lookY = -0.62;
-        view.fit = 0.66;
-      } else if (aspect < 1.15) {
-        view.camZ = 10.4;
-        view.camY = 1.08;
-        view.lookY = -0.28;
-        view.fit = 0.84;
-      } else {
-        view.camZ = 8.6;
-        view.camY = 1.15;
-        view.lookY = 0.02;
-        view.fit = 1;
-      }
+      view = baseView(aspect);
+      spreadScale = view.spreadScale;
       camera.updateProjectionMatrix();
+      update(progressRef.current);
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -256,22 +357,28 @@ export default function LoafStage({
     io.observe(host);
 
     if (reducedMotion) {
-      applyPose(0.34); // a still, three-quarter hero angle
       renderer.render(scene, camera);
       onReady?.();
     }
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      if (!active || !visible || reducedMotion) return;
+      if (reducedMotion || !activeRef.current || !visible) return;
 
-      pointer.x += (pointer.tx - pointer.x) * 0.06;
-      pointer.y += (pointer.ty - pointer.y) * 0.06;
+      pointer.x = pointer.tx;
+      pointer.y = pointer.ty;
 
-      applyPose(progressRef.current);
-      camera.position.x = pointer.x * 0.42;
-      camera.position.y += (-pointer.y * 0.22 - camera.position.y) * 0.12;
-      if (pointer.y === 0) camera.position.y += (view.camY - camera.position.y) * 0.05;
+      update(progressRef.current);
+
+      // Parallax is tracked as a smoothed *offset*, because update() has just
+      // written the absolute camera height for this frame.
+      pointer.ox += (pointer.x - pointer.ox) * 0.07;
+      pointer.oy += (pointer.y - pointer.oy) * 0.07;
+
+      const cam = cameraFor(progressRef.current, camera.aspect);
+      camera.position.x = pointer.ox * 0.34;
+      camera.position.y = cam.camY - pointer.oy * 0.2;
+      camera.lookAt(0, cam.lookY, 0);
 
       renderer.render(scene, camera);
     };
@@ -284,19 +391,25 @@ export default function LoafStage({
       ro.disconnect();
       io.disconnect();
       window.removeEventListener("pointermove", onPointerMove);
-      geometry.dispose();
-      material.dispose();
-      grain.dispose();
-      shadowTex.dispose();
+
+      for (const slice of slices) slice.geometry.dispose();
+      crustMat.dispose();
+      crumbMat.dispose();
+      crustTex.dispose();
+      crumbTex.dispose();
+      crumbBump.dispose();
+      bladeTex.dispose();
+      knife.dispose();
       shadow.geometry.dispose();
-      (shadow.material as THREE.Material).dispose();
+      shadowMat.dispose();
+      shadowTex.dispose();
       scene.environment?.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === host) {
         host.removeChild(renderer.domElement);
       }
     };
-  }, [active, progressRef, reducedMotion, onReady]);
+  }, [progressRef, reducedMotion, quality, onReady]);
 
   return (
     <div className="absolute inset-0">
