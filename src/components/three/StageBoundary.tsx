@@ -7,6 +7,13 @@ import { reportError } from "@/lib/diagnostics";
 
 type Props = {
   children: ReactNode;
+  /**
+   * What to show instead when the scene dies.
+   *
+   * The boundary cannot pick the right still on its own: the bread chapter's
+   * loaf is the wrong product in the buns chapter, so the caller supplies it.
+   */
+  fallback?: ReactNode;
 };
 
 type State = {
@@ -46,7 +53,7 @@ export default class StageBoundary extends Component<Props, State> {
     if (this.state.message !== null) {
       return (
         <>
-          <StageFallback reason={this.state.message} />
+          {this.props.fallback ?? <StageFallback reason={this.state.message} />}
           {/* Only visible with ?diag=1 — the phone-readable crash report. */}
           <DiagnosticOverlay />
         </>

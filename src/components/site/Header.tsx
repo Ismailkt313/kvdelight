@@ -2,8 +2,8 @@ import Link from "next/link";
 import BrandMark from "@/components/site/BrandMark";
 
 const chapters = [
-  { id: "bread", label: "Bread", state: "current" as const },
-  { id: "buns", label: "Soft Buns", state: "soon" as const },
+  { id: "bread", label: "Bread", state: "live" as const },
+  { id: "buns", label: "Soft Buns", state: "live" as const },
   { id: "cream-buns", label: "Cream Buns", state: "soon" as const },
 ];
 
@@ -52,15 +52,15 @@ export default function Header() {
           <ul className="flex items-center gap-7">
             {chapters.map((c) => (
               <li key={c.id}>
-                {c.state === "current" ? (
+                {c.state === "live" ? (
                   <a
-                    href="#bread"
-                    className="relative inline-flex py-2 text-[0.66rem] uppercase tracking-[0.28em] text-cream transition-colors hover:text-gold"
+                    href={`#${c.id}`}
+                    className="group relative inline-flex py-2 text-[0.66rem] uppercase tracking-[0.28em] text-cream transition-colors hover:text-gold"
                   >
                     {c.label}
                     <span
                       aria-hidden="true"
-                      className="absolute inset-x-0 -bottom-0.5 h-px bg-gold/70"
+                      className="absolute inset-x-0 -bottom-0.5 h-px origin-left scale-x-0 bg-gold/70 transition-transform duration-300 group-hover:scale-x-100"
                     />
                   </a>
                 ) : (
