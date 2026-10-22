@@ -40,6 +40,8 @@ Nothing is fetched from a third party at build time or at runtime.
 | `src/lib/creamChoreography.ts` | Cream timings, the hinge/fill/close/cut schedule, the nozzle's run along the long axis, camera framing solved against the real projection. |
 | `src/components/site/FounderSection.tsx` | The closing invitation: portrait, headline, founder name, and the single WhatsApp call to action. |
 | `src/lib/founder.ts` | Founder copy plus the WhatsApp number as configuration, and the `wa.me` URL builder. |
+| `src/components/site/Footer.tsx` | The sign-off: identity and tagline, the three chapter links, the compact founder invitation, copyright. |
+| `src/components/site/WhatsAppCta.tsx` | The WhatsApp button shared by the founder section and the footer — one link, one disabled fallback. |
 | `src/lib/sections.ts` | The chapter list — one source of truth for the ids in the page and the labels in the header. |
 | `src/lib/slices.ts` | **Sliced loaf geometry**: ten closed slabs, each with a crust shell, crumb cut faces and a crust rim. |
 | `src/lib/knife.ts` | Serrated bread knife, built from geometry (extruded profile + handle + rivets). |
@@ -379,6 +381,39 @@ decodeURIComponent(url.split("text=")[1]) === FOUNDER.message;
 `encodeURIComponent` is what keeps the comma, the full stop and the question mark
 intact through WhatsApp's query string; the check decodes the URL back and
 compares it to the source string.
+
+## The footer
+
+The founder section already ends the page, so the footer is a sign-off rather
+than a second send-off. Three columns on a wide screen, one stack on a phone:
+
+1. **Identity** — the crest with its wordmark, a gold hairline, and the tagline
+   *Softness · Freshness · Happiness*.
+2. **Products** — Bread, Soft Buns, Cream Buns, in scroll order.
+3. **Contact** — the portrait at 48 px, Sameer's name, *Interested in our
+   products?*, and the compact WhatsApp button.
+
+Then one line: `© <year> KV Delight` and *Made with care*.
+
+What is **not** there is the point: no address, no email, no social row, no
+opening hours, no legal paragraph. None of it exists for the brand yet, and a
+footer that invents it is worse than a footer with room to breathe.
+
+- **The links are the page's own navigation.** They are plain `#bread`, `#buns`
+  and `#cream-buns` anchors over the same ids the chapter bar highlights, so they
+  inherit the document's smooth scroll — and because that is CSS and not a JS
+  tween, the scroll events the three chapters scrub from still fire. On desktop
+  and on a phone, a tap is the same code path.
+- **The button is the same component as the founder section's**, at a shorter
+  cut (`compact`). Same URL builder, same 48 px floor, same disabled fallback if
+  the number is ever emptied — two invitations can't drift apart.
+- **Type is sized for a phone first.** Links are 48 px tall rows with hairline
+  dividers; the brand link is 44 px; the smallest type on the page (the micro
+  labels) is 0.58 rem letterspaced caps at 8.6:1, and every other pair sits
+  between 5.6:1 and 17.7:1 against `--color-ink-deep`. There is no `nowrap` text
+  and no fixed width, so nothing can push the page sideways at 320 px.
+- **`© <year>` is stamped at build time** from `new Date().getFullYear()`, so the
+  line can't go stale in the source.
 
 ## Device safety and the mobile tier
 
